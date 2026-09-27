@@ -14,7 +14,7 @@ function readApiKey(env) {
 }
 
 function jsonError(message, status) {
-  return Response.json({ error: message }, { status, headers: { "Cache-Control": "no-store" } });
+  return Response.json({ error: message }, { status, headers: { "Cache-Control": "no-store", "x-familytree-api": "1" } });
 }
 
 function parseChatModelPayload(text) {
@@ -42,12 +42,6 @@ function readModelText(payload) {
   return text?.trim() ? text : null;
 }
 
-function keyStatus(env) {
-  const runtime = typeof env?.GEMINI_API_KEY === "string" && Boolean(env.GEMINI_API_KEY.trim());
-  const baked = Boolean(BAKED_API_KEY);
-  return Response.json({ hasRuntimeKey: runtime, hasBakedKey: baked }, { headers: { "Cache-Control": "no-store" } });
-}
-
 async function handleChat(request, apiKey) {
   if (!apiKey) return jsonError(MISSING_API_KEY_MESSAGE, 500);
   const body = await request.json();
@@ -73,11 +67,7 @@ async function handleChat(request, apiKey) {
   return Response.json({
     assistantMessage: parsed.assistantMessage,
     graph: parsed.graph,
-  }, { headers: { "Cache-Control": "no-store" } });
-}
-
-export async function onRequestGet(context) {
-  return keyStatus(context.env);
+  }, { headers: { "Cache-Control": "no-store", "x-familytree-api": "1" } });
 }
 
 export async function onRequestPost(context) {
