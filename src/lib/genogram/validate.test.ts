@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { CHILD_DROP_INSET, CHILD_SLOT_WIDTH, MIN_COUPLE_GAP, NODE_HALF, NODE_SIZE } from "./constants";
 import { familyOfOriginIds, layoutFamily } from "./layout";
 import { addRelative, deletePerson, isCoupleKind } from "./relations";
-import { EMPTY_GRAPH } from "./types";
+import { EMPTY_GRAPH, type FamilyGraph } from "./types";
 import { validateNewPerson } from "./validate";
 
 test("empty age is allowed; relation is required when people exist", () => {
@@ -1015,7 +1015,7 @@ test("deep generations and many children stay intact after each ancestor is adde
 });
 
 function assertFamiliesStayOnOwnSides(
-  graph: FamilyGraphLike,
+  graph: FamilyGraph,
   layout: ReturnType<typeof layoutFamily>,
   leftId: string,
   rightId: string,
@@ -1051,11 +1051,6 @@ function assertFamiliesStayOnOwnSides(
     }
   }
 }
-
-type FamilyGraphLike = {
-  nodes: { id: string }[];
-  edges: { category?: string; kind: string; source: string; target: string }[];
-};
 
 function buildBothFamiliesOfOrigin() {
   let { graph, indexId, spouseId, fatherId, motherId } = buildThreeGenerationIndexFamily();
