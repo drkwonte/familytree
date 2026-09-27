@@ -27,6 +27,7 @@ export function ChatPanel() {
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
+        cache: "no-store",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: trimmed, graph }),
       });
