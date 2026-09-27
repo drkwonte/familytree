@@ -5,7 +5,17 @@ export const GEMINI_MODEL = "gemini-3.8-flash";
 const GEMINI_GENERATE_CONTENT_URL =
   `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
-const MISSING_API_KEY_MESSAGE = "GEMINI_API_KEY가 없습니다. .env.local에 키를 넣어 주세요.";
+export const MISSING_API_KEY_MESSAGE =
+  "GEMINI_API_KEY가 없습니다. 로컬은 .env.local, Cloudflare는 프로젝트 환경 변수에 넣어 주세요.";
+
+export function readGeminiApiKey(...candidates: unknown[]): string | undefined {
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
 const EMPTY_MESSAGE_ERROR = "메시지를 입력해 주세요.";
 const EMPTY_MODEL_RESPONSE_ERROR = "모델 응답이 비었습니다.";
 const INVALID_GRAPH_ERROR = "그래프 형식이 올바르지 않습니다.";

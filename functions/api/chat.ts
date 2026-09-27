@@ -1,4 +1,5 @@
-import { handleChatPost } from "../../src/lib/genogram/chat";
+import { handleChatPost, readGeminiApiKey } from "../../src/lib/genogram/chat";
+import { BUILD_TIME_GEMINI_API_KEY } from "../runtime-env";
 
 type ChatFunctionEnv = {
   GEMINI_API_KEY?: string;
@@ -10,5 +11,6 @@ type ChatFunctionContext = {
 };
 
 export async function onRequestPost(context: ChatFunctionContext) {
-  return handleChatPost(context.request, context.env.GEMINI_API_KEY);
+  const apiKey = readGeminiApiKey(context.env?.GEMINI_API_KEY, BUILD_TIME_GEMINI_API_KEY);
+  return handleChatPost(context.request, apiKey);
 }

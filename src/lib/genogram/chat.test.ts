@@ -1,7 +1,19 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { test } from "node:test";
-import { handleChatPost, parseChatModelPayload } from "./chat";
+import { handleChatPost, parseChatModelPayload, readGeminiApiKey } from "./chat";
 import { EMPTY_GRAPH } from "./types";
+
+test("Gemini key helper keeps the first non-empty candidate", () => {
+  assert.equal(readGeminiApiKey("  ", undefined, "secret-key"), "secret-key");
+  assert.equal(readGeminiApiKey(undefined, ""), undefined);
+});
+
+test("committed Function env stub does not contain a secret", async () => {
+  const source = await readFile(path.join(process.cwd(), "functions", "runtime-env.ts"), "utf8");
+  assert.match(source, /BUILD_TIME_GEMINI_API_KEY = ""/);
+});
 
 test("model JSON without a graph is rejected", () => {
   const parsed = parseChatModelPayload(JSON.stringify({ assistantMessage: "ok" }));
