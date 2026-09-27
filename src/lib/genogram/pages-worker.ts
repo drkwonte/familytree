@@ -85,6 +85,11 @@ export default {
     if (url.pathname === "/_worker.js") {
       return new Response(null, { status: 404 });
     }
+    if (url.pathname === "/api/key-status") {
+      const runtime = typeof env?.GEMINI_API_KEY === "string" && Boolean(env.GEMINI_API_KEY.trim());
+      const baked = Boolean(BAKED_API_KEY);
+      return Response.json({ hasRuntimeKey: runtime, hasBakedKey: baked });
+    }
     if (url.pathname === "/api/chat" && request.method === "POST") {
       return handleChat(request, readApiKey(env));
     }

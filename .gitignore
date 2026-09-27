@@ -17,6 +17,7 @@
 /.next/
 /out/
 /public/_worker.js
+/public/cf-key-status.json
 
 # production
 /build
