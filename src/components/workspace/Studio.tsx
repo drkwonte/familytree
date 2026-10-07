@@ -15,8 +15,9 @@ import { useFamilyStore } from "@/store/family-store";
 
 const VIEW_MODE_EDIT: ViewMode = "edit";
 const VIEW_MODE_OUTPUT: ViewMode = "final";
-const SIDEBAR_FORM = "form";
-const SIDEBAR_CHAT = "chat";
+const SIDEBAR_FORM = "form" as const;
+const SIDEBAR_CHAT = "chat" as const;
+type SidebarPanel = typeof SIDEBAR_FORM | typeof SIDEBAR_CHAT;
 const PERSON_PANEL_LABEL = "인물정보";
 const INTERACTION_PANEL_LABEL = "인물 간 상호작용";
 
@@ -29,8 +30,8 @@ function SidebarModeSwitch({
   panel,
   onChange,
 }: {
-  panel: typeof SIDEBAR_FORM | typeof SIDEBAR_CHAT;
-  onChange: (panel: typeof SIDEBAR_FORM | typeof SIDEBAR_CHAT) => void;
+  panel: SidebarPanel;
+  onChange: (panel: SidebarPanel) => void;
 }) {
   return (
     <ToggleGroup
@@ -64,7 +65,7 @@ export function Studio() {
   const canUndo = useFamilyStore((state) => state.past.length > 0);
   const canRedo = useFamilyStore((state) => state.future.length > 0);
   const setViewMode = useFamilyStore((state) => state.setViewMode);
-  const [sidebarPanel, setSidebarPanel] = useState(SIDEBAR_FORM);
+  const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>(SIDEBAR_FORM);
   const [legendOpen, setLegendOpen] = useState(true);
 
   useEffect(() => {
