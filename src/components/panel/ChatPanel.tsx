@@ -77,7 +77,7 @@ export function ChatPanel() {
           <Textarea
             value={message}
             onChange={(event) => setMessage(event.target.value)}
-            placeholder="예: 아버지와 나는 단절이야. 아버지는 만성 우울증을 앓고 계셔."
+            placeholder="예: 인물1과 인물2 사이에 갈등 표시해줘. 인물5와 인물7 사이에 단절 표시해줘."
             className="min-h-24 resize-none pb-12 pr-12"
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {

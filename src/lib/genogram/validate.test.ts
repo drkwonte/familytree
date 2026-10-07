@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CHILD_DROP_INSET, CHILD_SLOT_WIDTH, MIN_COUPLE_GAP, NODE_HALF, NODE_SIZE } from "./constants";
+import {
+  CHILD_DROP_INSET,
+  CHILD_SLOT_WIDTH,
+  COLLATERAL_SIBLING_GAP,
+  GENERATION_GAP,
+  MARRIED_COLLATERAL_GAP,
+  MIN_COUPLE_GAP,
+  NODE_HALF,
+  NODE_SIZE,
+} from "./constants";
 import { familyOfOriginIds, layoutFamily } from "./layout";
 import { addRelative, deletePerson, isCoupleKind } from "./relations";
 import { EMPTY_GRAPH, type FamilyGraph } from "./types";
-import { validateNewPerson } from "./validate";
+import { SIBLING_NEEDS_PARENT_MESSAGE, validateNewPerson } from "./validate";
 
 test("empty age is allowed; relation is required when people exist", () => {
   assert.equal(
@@ -57,6 +66,442 @@ test("empty age is allowed; relation is required when people exist", () => {
     }),
     null,
   );
+});
+
+test("a sibling cannot be added until the anchor person has a parent", () => {
+  assert.equal(
+    validateNewPerson({
+      age: "65",
+      vitalStatus: "alive",
+      hasExistingPeople: true,
+      relation: "sibling",
+      anchorId: "client",
+      anchorHasParent: false,
+    }),
+    SIBLING_NEEDS_PARENT_MESSAGE,
+  );
+  assert.equal(
+    validateNewPerson({
+      age: "65",
+      vitalStatus: "alive",
+      hasExistingPeople: true,
+      relation: "brother",
+      anchorId: "client",
+      anchorHasParent: true,
+    }),
+    null,
+  );
+});
+
+test("an older brother sits to the left of the client, not beyond the spouse", () => {
+  let graph = addRelative(EMPTY_GRAPH, {
+    name: "",
+    gender: "M",
+    relation: "self",
+    isIndexPerson: true,
+    age: 60,
+  });
+  const clientId = graph.nodes[0].id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "spouse",
+    anchorId: clientId,
+    age: 60,
+  });
+  const spouseId = graph.nodes.find((node) => node.id !== clientId)!.id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "father",
+    anchorId: clientId,
+    age: 90,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "mother",
+    anchorId: clientId,
+    age: 88,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "sibling",
+    anchorId: clientId,
+    age: 65,
+  });
+  const brotherId = graph.nodes.find((node) => node.data.age === 65)!.id;
+  assert.ok(
+    graph.edges.some(
+      (edge) => edge.kind === "parent" && edge.target === brotherId,
+    ),
+  );
+  const layout = layoutFamily(graph);
+  const client = layout.nodes.find((node) => node.id === clientId)!;
+  const spouse = layout.nodes.find((node) => node.id === spouseId)!;
+  const brother = layout.nodes.find((node) => node.id === brotherId)!;
+  assert.ok(brother.x < client.x, `brother ${brother.x} should be left of client ${client.x}`);
+  assert.ok(client.x < spouse.x, `client ${client.x} should be left of spouse ${spouse.x}`);
+  assert.ok(brother.x < spouse.x);
+});
+
+test("client siblings use a shorter drop than the client so they sit above the couple", () => {
+  let graph = addRelative(EMPTY_GRAPH, {
+    name: "",
+    gender: "M",
+    relation: "self",
+    isIndexPerson: true,
+    age: 60,
+  });
+  const clientId = graph.nodes[0].id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "spouse",
+    anchorId: clientId,
+    age: 60,
+  });
+  const spouseId = graph.nodes.find((node) => node.id !== clientId)!.id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "father",
+    anchorId: clientId,
+    vitalStatus: "deceased",
+    age: 90,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "mother",
+    anchorId: clientId,
+    vitalStatus: "deceased",
+    age: 88,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "sibling",
+    anchorId: clientId,
+    age: 65,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "sibling",
+    anchorId: clientId,
+    age: 58,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "child",
+    anchorId: clientId,
+    age: 30,
+  });
+  const layout = layoutFamily(graph);
+  const client = layout.nodes.find((node) => node.id === clientId)!;
+  const spouse = layout.nodes.find((node) => node.id === spouseId)!;
+  const brother = layout.nodes.find((node) => node.data.age === 65)!;
+  const sister = layout.nodes.find((node) => node.data.age === 58)!;
+  const father = layout.nodes.find((node) => node.data.age === 90)!;
+  const child = layout.nodes.find((node) => node.data.age === 30)!;
+  assert.equal(spouse.y, client.y);
+  assert.ok(child.y > client.y);
+  assert.equal(brother.y, sister.y);
+  assert.equal(brother.y - father.y, COLLATERAL_SIBLING_GAP);
+  assert.equal(client.y - father.y, GENERATION_GAP);
+  assert.ok(brother.x < client.x);
+  assert.ok(client.x < spouse.x);
+  assert.ok(client.x < sister.x);
+  assert.ok(Math.abs(sister.x - spouse.x) >= NODE_SIZE || sister.y + NODE_SIZE < spouse.y);
+  const parentBar = layout.coupleBars.find(
+    (bar) => bar.leftId === father.id || bar.rightId === father.id,
+  )!;
+  for (const sibling of [brother, sister]) {
+    const drop = layout.childDrops.find(
+      (item) => item.fromY === parentBar.barY && Math.abs(item.x - sibling.x) < 0.01,
+    );
+    assert.ok(drop);
+    assert.ok(drop.toY < client.y);
+    assert.equal(drop.fromX, undefined);
+  }
+});
+
+test("a child's spouse stays beside them below unmarried siblings", () => {
+  let graph = addRelative(EMPTY_GRAPH, {
+    name: "",
+    gender: "M",
+    relation: "self",
+    isIndexPerson: true,
+    age: 60,
+  });
+  const clientId = graph.nodes[0].id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "spouse",
+    anchorId: clientId,
+    age: 60,
+  });
+  const clientSpouseId = graph.nodes.find((node) => node.id !== clientId)!.id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "father",
+    anchorId: clientId,
+    vitalStatus: "deceased",
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "mother",
+    anchorId: clientId,
+    vitalStatus: "deceased",
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "sibling",
+    anchorId: clientId,
+    age: 65,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "sibling",
+    anchorId: clientId,
+    age: 58,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "child",
+    anchorId: clientId,
+    age: 35,
+  });
+  const sonId = graph.nodes.find((node) => node.data.age === 35)!.id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "child",
+    anchorId: clientId,
+    age: 30,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "child",
+    anchorId: clientId,
+    age: 28,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "spouse",
+    anchorId: sonId,
+    age: 35,
+  });
+  const layout = layoutFamily(graph);
+  const client = layout.nodes.find((node) => node.id === clientId)!;
+  const clientSpouse = layout.nodes.find((node) => node.id === clientSpouseId)!;
+  const son = layout.nodes.find((node) => node.id === sonId)!;
+  const sonSpouse = layout.nodes.find(
+    (node) => node.data.age === 35 && node.id !== sonId,
+  )!;
+  const middle = layout.nodes.find((node) => node.data.age === 30)!;
+  const youngest = layout.nodes.find((node) => node.data.age === 28)!;
+  assert.equal(middle.y - client.y, COLLATERAL_SIBLING_GAP);
+  assert.equal(youngest.y, middle.y);
+  assert.equal(son.y - client.y, MARRIED_COLLATERAL_GAP);
+  assert.ok(son.y > middle.y);
+  assert.ok(son.y - client.y < GENERATION_GAP);
+  assert.equal(sonSpouse.y, son.y);
+  assert.equal(sonSpouse.x - son.x, MIN_COUPLE_GAP);
+  assert.ok(son.x < sonSpouse.x);
+  assert.ok(sonSpouse.x + NODE_HALF <= middle.x - NODE_HALF);
+  assert.ok(middle.x < youngest.x);
+  assert.ok(sonSpouse.x < clientSpouse.x);
+  assert.ok(clientSpouse.x - client.x > sonSpouse.x - son.x);
+  const coupleBar = layout.coupleBars.find(
+    (bar) =>
+      (bar.leftId === clientId && bar.rightId === clientSpouseId) ||
+      (bar.leftId === clientSpouseId && bar.rightId === clientId),
+  )!;
+  const sonDrop = layout.childDrops.find(
+    (drop) => drop.fromY === coupleBar.barY && Math.abs(drop.x - son.x) < 0.01,
+  );
+  assert.ok(sonDrop);
+  assert.equal(sonDrop.fromX, undefined);
+  assert.equal(sonDrop.toY, son.y);
+});
+
+test("a couple starts at the minimum gap and grows only with its own children", () => {
+  let graph = addRelative(EMPTY_GRAPH, {
+    name: "",
+    gender: "M",
+    relation: "self",
+    isIndexPerson: true,
+    age: 30,
+  });
+  const leftId = graph.nodes[0].id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "spouse",
+    anchorId: leftId,
+    age: 30,
+  });
+  const rightId = graph.nodes.find((node) => node.id !== leftId)!.id;
+  const gapOf = (layout: ReturnType<typeof layoutFamily>) => {
+    const bar = layout.coupleBars.find(
+      (item) =>
+        (item.leftId === leftId && item.rightId === rightId) ||
+        (item.leftId === rightId && item.rightId === leftId),
+    )!;
+    return bar.rightX - bar.leftX;
+  };
+  let layout = layoutFamily(graph);
+  assert.equal(gapOf(layout), MIN_COUPLE_GAP);
+
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "child",
+    anchorId: leftId,
+    age: 1,
+  });
+  const onlyChildId = graph.nodes.find((node) => node.data.age === 1)!.id;
+  layout = layoutFamily(graph);
+  const onlyChild = layout.nodes.find((node) => node.id === onlyChildId)!;
+  const bar = layout.coupleBars.find((item) => item.leftId === leftId || item.rightId === leftId)!;
+  assert.equal(gapOf(layout), MIN_COUPLE_GAP);
+  assert.equal(onlyChild.x, (bar.leftX + bar.rightX) / 2);
+
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "child",
+    anchorId: leftId,
+    age: 2,
+  });
+  layout = layoutFamily(graph);
+  assert.equal(gapOf(layout), CHILD_SLOT_WIDTH + CHILD_DROP_INSET * 2);
+  const kids = layout.nodes.filter((node) => node.data.age === 1 || node.data.age === 2);
+  const grown = layout.coupleBars.find((item) => item.leftId === leftId || item.rightId === leftId)!;
+  const kidMid = kids.reduce((sum, node) => sum + node.x, 0) / kids.length;
+  assert.ok(Math.abs(kidMid - (grown.leftX + grown.rightX) / 2) < 0.01);
+
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "child",
+    anchorId: onlyChildId,
+    age: 0,
+  });
+  layout = layoutFamily(graph);
+  assert.equal(gapOf(layout), CHILD_SLOT_WIDTH + CHILD_DROP_INSET * 2);
+
+  let side = addRelative(EMPTY_GRAPH, {
+    name: "",
+    gender: "M",
+    relation: "self",
+    isIndexPerson: true,
+    age: 60,
+  });
+  const parentId = side.nodes[0].id;
+  side = addRelative(side, {
+    name: "",
+    gender: "F",
+    relation: "spouse",
+    anchorId: parentId,
+    age: 60,
+  });
+  side = addRelative(side, {
+    name: "",
+    gender: "M",
+    relation: "child",
+    anchorId: parentId,
+    age: 30,
+  });
+  const marriedChildId = side.nodes.find((node) => node.data.age === 30)!.id;
+  side = addRelative(side, {
+    name: "",
+    gender: "F",
+    relation: "spouse",
+    anchorId: marriedChildId,
+    age: 30,
+  });
+  const sideLayout = layoutFamily(side);
+  const parentBar = sideLayout.coupleBars.find(
+    (item) => item.leftId === parentId || item.rightId === parentId,
+  )!;
+  const marriedChild = sideLayout.nodes.find((node) => node.id === marriedChildId)!;
+  assert.equal(parentBar.rightX - parentBar.leftX, MIN_COUPLE_GAP);
+  assert.equal(marriedChild.x, (parentBar.leftX + parentBar.rightX) / 2);
+});
+
+test("unmarried siblings sit one short seat apart until a spouse needs room", () => {
+  let graph = addRelative(EMPTY_GRAPH, {
+    name: "",
+    gender: "M",
+    relation: "self",
+    isIndexPerson: true,
+    age: 50,
+  });
+  const fatherId = graph.nodes[0].id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "spouse",
+    anchorId: fatherId,
+    age: 48,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "child",
+    anchorId: fatherId,
+    age: 20,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "child",
+    anchorId: fatherId,
+    age: 18,
+  });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "child",
+    anchorId: fatherId,
+    age: 16,
+  });
+  const at = (layout: ReturnType<typeof layoutFamily>, age: number) =>
+    layout.nodes.find((node) => node.data.age === age)!;
+  let layout = layoutFamily(graph);
+  const oldest = at(layout, 20);
+  const middle = at(layout, 18);
+  const youngest = at(layout, 16);
+  assert.equal(middle.x - oldest.x, CHILD_SLOT_WIDTH);
+  assert.equal(youngest.x - middle.x, CHILD_SLOT_WIDTH);
+
+  const middleId = graph.nodes.find((node) => node.data.age === 18)!.id;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "F",
+    relation: "spouse",
+    anchorId: middleId,
+    age: 18,
+  });
+  layout = layoutFamily(graph);
+  const marriedSon = layout.nodes.find((node) => node.data.age === 18 && node.data.gender === "M")!;
+  const spouse = layout.nodes.find((node) => node.data.age === 18 && node.data.gender === "F")!;
+  assert.equal(marriedSon.x - at(layout, 20).x, CHILD_SLOT_WIDTH);
+  assert.ok(at(layout, 16).x - marriedSon.x > CHILD_SLOT_WIDTH);
+  assert.ok(spouse.x + NODE_HALF <= at(layout, 16).x - NODE_HALF);
 });
 
 test("delete person removes edges and household membership", () => {

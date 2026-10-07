@@ -121,6 +121,10 @@ function resolveAnchorId(graph: FamilyGraph, requestedId?: string): string | und
   return graph.nodes[0]?.id;
 }
 
+export function personHasParent(graph: FamilyGraph, personId: string): boolean {
+  return parentsOfPerson(graph, personId).length > 0;
+}
+
 function parentsOfPerson(graph: FamilyGraph, personId: string): string[] {
   return graph.edges
     .filter(

@@ -4,6 +4,7 @@ import {
   CHILD_DROP_INSET,
   CHILD_SLOT_WIDTH,
   COLLATERAL_SIBLING_GAP,
+  MARRIED_COLLATERAL_GAP,
   FOO_CLEARANCE_PASSES,
   FOO_SIDE_CLEARANCE,
   HOUSEHOLD_PAD_X,
@@ -329,7 +330,18 @@ type SiblingUnit = {
   child: FamilyNode;
   spouse?: FamilyNode;
   width: number;
+  childOffset: number;
 };
+
+function isCoreCoupleIds(graph: FamilyGraph, leftId: string, rightId: string): boolean {
+  const index = graph.nodes.find((node) => node.data.isIndexPerson) ?? graph.nodes[0];
+  if (!index) return false;
+  const spouseId = findSpouseId(graph, index.id);
+  if (!spouseId) return false;
+  return (
+    (leftId === index.id && rightId === spouseId) || (leftId === spouseId && rightId === index.id)
+  );
+}
 
 function coupleInnerSpan(graph: FamilyGraph, leftId: string, rightId: string): number {
   return siblingUnits(graph, childrenOfCouple(graph, leftId, rightId)).reduce(
@@ -341,21 +353,38 @@ function coupleInnerSpan(graph: FamilyGraph, leftId: string, rightId: string): n
 function coupleGap(graph: FamilyGraph, leftId: string, rightId: string): number {
   const childSpan = coupleInnerSpan(graph, leftId, rightId);
   if (childSpan === 0) return MIN_COUPLE_GAP;
-  return Math.max(MIN_COUPLE_GAP, childSpan + CHILD_DROP_INSET * 2);
+  // The first child hangs from the middle of the minimum gap. Each further
+  // seat pushes the partners apart just enough to keep every drop inset.
+  const seatsBeyondTheFirst = Math.max(0, childSpan - CHILD_SLOT_WIDTH);
+  return Math.max(MIN_COUPLE_GAP, seatsBeyondTheFirst + CHILD_DROP_INSET * 2);
 }
 
 function siblingUnits(graph: FamilyGraph, children: FamilyNode[]): SiblingUnit[] {
   const siblingIds = new Set(children.map((child) => child.id));
-  return children.map((child) => {
+  return children.map((child, index) => {
     const spouseId = findSpouseId(graph, child.id);
     const spouse =
       spouseId && !siblingIds.has(spouseId)
         ? graph.nodes.find((node) => node.id === spouseId)
         : undefined;
-    return {
+    const centered = {
       child,
       spouse,
       width: CHILD_SLOT_WIDTH,
+      childOffset: CHILD_SLOT_WIDTH / 2,
+    };
+    if (!spouse || isCoreCoupleIds(graph, child.id, spouse.id)) return centered;
+    // Reserve a minimum seat only when another sibling would otherwise sit on
+    // the spouse. A couple with a single child keeps the minimum gap.
+    const spouseOnRight = coupleOrder(child, spouse)[0].id === child.id;
+    const siblingBesideSpouse = spouseOnRight ? index < children.length - 1 : index > 0;
+    if (!siblingBesideSpouse) return centered;
+    const spouseGap = MIN_COUPLE_GAP;
+    return {
+      child,
+      spouse,
+      width: CHILD_SLOT_WIDTH + spouseGap,
+      childOffset: spouseOnRight ? CHILD_SLOT_WIDTH / 2 : spouseGap + CHILD_SLOT_WIDTH / 2,
     };
   });
 }
@@ -409,16 +438,10 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
     placedCouples.add(edge.id);
   };
 
-  const indexId = (graph.nodes.find((node) => node.data.isIndexPerson) ?? graph.nodes[0])?.id;
+  const indexId = graph.nodes.find((node) => node.data.isIndexPerson)?.id ?? graph.nodes[0]?.id;
+  const indexSpouseId = indexId ? findSpouseId(graph, indexId) : undefined;
 
-  const isInLawFamilyOfOrigin = (children: FamilyNode[]) => {
-    if (!indexId) return false;
-    const spouseId = findSpouseId(graph, indexId);
-    if (!spouseId) return false;
-    const includesSpouse = children.some((child) => child.id === spouseId);
-    const includesIndex = children.some((child) => child.id === indexId);
-    return includesSpouse && !includesIndex;
-  };
+  const isCoreCouple = (leftId: string, rightId: string) => isCoreCoupleIds(graph, leftId, rightId);
 
   const coupleOwnsPerson = (bar: CoupleBar, personId: string) =>
     childrenOfCouple(graph, bar.leftId, bar.rightId).some((child) => child.id === personId);
@@ -426,17 +449,18 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
   const isPinnedAsChild = (personId: string, exceptEdgeId: string) =>
     coupleBars.some((bar) => bar.id !== exceptEdgeId && coupleOwnsPerson(bar, personId));
 
-  const childBaseline = (
-    coupleY: number,
-    child: FamilyNode,
-    compressCollaterals: boolean,
-    alignedY?: number,
-  ) => {
-    if (alignedY != null) return alignedY;
-    const spouseOfIndex = indexId ? findSpouseId(graph, indexId) : undefined;
-    const isLinkingSpouse = spouseOfIndex === child.id;
-    return coupleY + (compressCollaterals && !isLinkingSpouse ? COLLATERAL_SIBLING_GAP : GENERATION_GAP);
+  // The index couple keeps a full generation drop. Other marriages sit a step
+  // below unmarried siblings so they read as secondary, not as a second core.
+  const childDropGap = (child: FamilyNode, row: FamilyNode[]) => {
+    const rowHasMarriedChild = row.some((person) => findSpouseId(graph, person.id));
+    if (!rowHasMarriedChild) return GENERATION_GAP;
+    if (child.id === indexId || child.id === indexSpouseId) return GENERATION_GAP;
+    if (findSpouseId(graph, child.id)) return MARRIED_COLLATERAL_GAP;
+    return COLLATERAL_SIBLING_GAP;
   };
+
+  const childBaseline = (coupleY: number, child: FamilyNode, row: FamilyNode[]) =>
+    coupleY + childDropGap(child, row);
 
   const layoutNestedMarriage = (unit: SiblingUnit, childX: number, childY: number) => {
     if (!unit.spouse) return;
@@ -471,7 +495,6 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
     barRightX: number,
   ) => {
     const children = units.map((unit) => unit.child);
-    const compressCollaterals = isInLawFamilyOfOrigin(children);
     const firstPlaced = units.findIndex((unit) => positions.has(unit.child.id));
     if (firstPlaced === -1) {
       const span = units.reduce((sum, unit) => sum + unit.width, 0);
@@ -480,45 +503,47 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
       for (const unit of units) {
         placeUnplacedChild(
           unit,
-          cursor + unit.width / 2,
-          childBaseline(coupleY, unit.child, compressCollaterals),
+          cursor + unit.childOffset,
+          childBaseline(coupleY, unit.child, children),
         );
         cursor += unit.width;
       }
       return;
     }
 
-    const alignedY = positions.get(units[firstPlaced].child.id)!.y;
-    let rightCursor =
-      positions.get(units[firstPlaced].child.id)!.x + units[firstPlaced].width / 2;
+    const unitLeft = (unit: SiblingUnit, x: number) => x - unit.childOffset;
+    const unitRight = (unit: SiblingUnit, x: number) => x - unit.childOffset + unit.width;
+    let rightEdge = unitRight(
+      units[firstPlaced],
+      positions.get(units[firstPlaced].child.id)!.x,
+    );
     for (let index = firstPlaced + 1; index < units.length; index += 1) {
       const unit = units[index];
       if (positions.has(unit.child.id)) {
-        rightCursor = Math.max(rightCursor, positions.get(unit.child.id)!.x + unit.width / 2);
+        rightEdge = Math.max(rightEdge, unitRight(unit, positions.get(unit.child.id)!.x));
         continue;
       }
       placeUnplacedChild(
         unit,
-        rightCursor + unit.width / 2,
-        childBaseline(coupleY, unit.child, compressCollaterals, alignedY),
+        rightEdge + unit.childOffset,
+        childBaseline(coupleY, unit.child, children),
       );
-      rightCursor += unit.width;
+      rightEdge += unit.width;
     }
 
-    let leftCursor =
-      positions.get(units[firstPlaced].child.id)!.x - units[firstPlaced].width / 2;
+    let leftEdge = unitLeft(units[firstPlaced], positions.get(units[firstPlaced].child.id)!.x);
     for (let index = firstPlaced - 1; index >= 0; index -= 1) {
       const unit = units[index];
       if (positions.has(unit.child.id)) {
-        leftCursor = Math.min(leftCursor, positions.get(unit.child.id)!.x - unit.width / 2);
+        leftEdge = Math.min(leftEdge, unitLeft(unit, positions.get(unit.child.id)!.x));
         continue;
       }
+      leftEdge -= unit.width;
       placeUnplacedChild(
         unit,
-        leftCursor - unit.width / 2,
-        childBaseline(coupleY, unit.child, compressCollaterals, alignedY),
+        leftEdge + unit.childOffset,
+        childBaseline(coupleY, unit.child, children),
       );
-      leftCursor -= unit.width;
     }
   };
 
@@ -529,15 +554,15 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
     coupleY: number,
     children: FamilyNode[],
   ) => {
-    const childXs = children
-      .map((child) => positions.get(child.id)?.x)
-      .filter((x): x is number => x != null);
-    if (childXs.length === 0) return;
-    const childrenMid = childXs.reduce((sum, x) => sum + x, 0) / childXs.length;
-    const fittedGap = Math.max(
-      MIN_COUPLE_GAP,
-      Math.max(...childXs) - Math.min(...childXs) + CHILD_DROP_INSET * 2,
-    );
+    const units = siblingUnits(graph, children);
+    const blockEdges = units.flatMap((unit) => {
+      const x = positions.get(unit.child.id)?.x;
+      if (x == null) return [];
+      return [x - unit.childOffset, x - unit.childOffset + unit.width];
+    });
+    if (blockEdges.length === 0) return;
+    const childrenMid = (Math.min(...blockEdges) + Math.max(...blockEdges)) / 2;
+    const fittedGap = coupleGap(graph, left.id, right.id);
     const barLeftX = childrenMid - fittedGap / 2;
     const barRightX = childrenMid + fittedGap / 2;
     positions.set(left.id, { x: barLeftX, y: coupleY });
@@ -611,19 +636,14 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
     originX += MIN_COUPLE_GAP + NODE_SIZE * 2;
   }
 
-  const spouseOfIndex = indexId ? findSpouseId(graph, indexId) : undefined;
   for (const parent of graph.nodes) {
     if (positions.has(parent.id)) continue;
     const placedChildren = childrenOfParent(graph, parent.id)
       .map((child) => ({ child, point: positions.get(child.id) }))
       .filter((item): item is { child: FamilyNode; point: Point } => Boolean(item.point));
     if (placedChildren.length === 0) continue;
-    const compressCollaterals = isInLawFamilyOfOrigin(placedChildren.map((item) => item.child));
-    const childYs = placedChildren.map((item) => {
-      const isLinkingSpouse = spouseOfIndex === item.child.id;
-      const gap = compressCollaterals && !isLinkingSpouse ? COLLATERAL_SIBLING_GAP : GENERATION_GAP;
-      return item.point.y - gap;
-    });
+    const row = placedChildren.map((item) => item.child);
+    const childYs = placedChildren.map((item) => item.point.y - childDropGap(item.child, row));
     positions.set(parent.id, {
       x: placedChildren.reduce((sum, item) => sum + item.point.x, 0) / placedChildren.length,
       y: Math.min(...childYs),
@@ -650,19 +670,14 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
     }
   };
 
-  const isLockedToOtherCouple = (personId: string, exceptBarId: string) =>
-    coupleBars.some(
-      (other) =>
-        other.id !== exceptBarId &&
-        (other.leftId === personId || other.rightId === personId),
-    );
-
-  const shiftOwnBranch = (personId: string, delta: number, visited: Set<string>) => {
+  const shiftWithMarriage = (personId: string, delta: number, visited: Set<string>) => {
     if (visited.has(personId)) return;
     visited.add(personId);
     shiftX(personId, delta);
+    const spouseId = findSpouseId(graph, personId);
+    if (spouseId) shiftWithMarriage(spouseId, delta, visited);
     for (const child of childrenOfParent(graph, personId)) {
-      shiftOwnBranch(child.id, delta, visited);
+      shiftWithMarriage(child.id, delta, visited);
     }
   };
 
@@ -670,7 +685,6 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
     const children = childrenOfCouple(graph, bar.leftId, bar.rightId);
     if (children.length === 0) return;
     const units = siblingUnits(graph, children);
-    if (units.some((unit) => isLockedToOtherCouple(unit.child.id, bar.id))) return;
     const span = units.reduce((sum, unit) => sum + unit.width, 0);
     const mid = (bar.leftX + bar.rightX) / 2;
     let cursor = mid - span / 2;
@@ -678,7 +692,7 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
     for (const unit of units) {
       const current = positions.get(unit.child.id);
       if (current) {
-        shiftOwnBranch(unit.child.id, cursor + unit.width / 2 - current.x, visited);
+        shiftWithMarriage(unit.child.id, cursor + unit.childOffset - current.x, visited);
       }
       cursor += unit.width;
     }
@@ -712,6 +726,7 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
       (left, right) => (generations.get(left.leftId) ?? 0) - (generations.get(right.leftId) ?? 0),
     );
     for (const bar of orderedBars) {
+      if (!isCoreCouple(bar.leftId, bar.rightId)) continue;
       const needed = requiredFooGap(bar.leftId, bar.rightId);
       const currentGap = bar.rightX - bar.leftX;
       if (currentGap + 0.01 >= needed) continue;
@@ -731,6 +746,8 @@ export function layoutFamily(graph: FamilyGraph): FamilyLayout {
     }
     if (!widened) break;
   }
+
+  for (const bar of coupleBars) packCoupleChildren(bar);
 
   const childDrops: ChildDrop[] = [];
   const linkedChildren = new Set<string>();

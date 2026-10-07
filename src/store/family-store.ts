@@ -70,7 +70,7 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
       id: "welcome",
       role: "assistant",
       content:
-        "가족을 문장으로 말씀해 주세요. 예: 아버지와는 대화가 단절되었고, 어머니는 주요 의논대상이야.",
+        "누구와 누구 사이인지 인물 번호로 분명히 적어 주세요. 예: 인물1과 인물2 사이에 갈등 표시해줘. 인물5와 인물7 사이에 단절 표시해줘.",
     },
   ],
   isThinking: false,

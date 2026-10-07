@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { personCode } from "@/lib/genogram/relations";
+import { personCode, personHasParent } from "@/lib/genogram/relations";
 import type { FamilyNode, Gender, RelativeRelation, VitalStatus } from "@/lib/genogram/types";
 import { validateNewPerson } from "@/lib/genogram/validate";
 import { useFamilyStore } from "@/store/family-store";
@@ -124,6 +124,7 @@ export function PersonForm() {
       hasExistingPeople: editingPerson ? false : graph.nodes.length > 0,
       relation,
       anchorId,
+      anchorHasParent: personHasParent(graph, anchorId),
     });
     if (error) {
       window.alert(error);
@@ -287,17 +288,15 @@ export function PersonForm() {
       {editingPerson ? (
         <div className="grid gap-2">
           <Button type="submit">저장</Button>
-          <div className="grid grid-cols-2 gap-2">
-            <Button type="button" variant="outline" onClick={() => selectPerson(null)}>
-              추가 모드
-            </Button>
-            <Button type="button" variant="destructive" onClick={handleDelete}>
-              삭제
-            </Button>
-          </div>
+          <Button type="button" variant="destructive" onClick={handleDelete}>
+            삭제
+          </Button>
+          <Button type="button" variant="outline" onClick={() => selectPerson(null)}>
+            ← 추가모드
+          </Button>
         </div>
       ) : (
-        <Button type="submit">인물 추가</Button>
+        <Button type="submit">확인</Button>
       )}
     </form>
   );

@@ -22,40 +22,40 @@ function Sample({ kind }: { kind: string }) {
   if (kind === "close") {
     return (
       <svg width="36" height="14" viewBox="0 0 36 14" aria-hidden>
-        <line x1="2" y1="5" x2="34" y2="5" {...strokeProps} strokeWidth="2" />
-        <line x1="2" y1="9" x2="34" y2="9" {...strokeProps} strokeWidth="2" />
+        <path d="M2 5 A 40 40 0 0 1 34 5" fill="none" {...strokeProps} strokeWidth="2" />
+        <path d="M2 9 A 40 40 0 0 1 34 9" fill="none" {...strokeProps} strokeWidth="2" />
       </svg>
     );
   }
   if (kind === "fused") {
     return (
       <svg width="36" height="14" viewBox="0 0 36 14" aria-hidden>
-        <line x1="2" y1="3.5" x2="34" y2="3.5" {...strokeProps} strokeWidth="1.6" />
-        <line x1="2" y1="7" x2="34" y2="7" {...strokeProps} strokeWidth="1.6" />
-        <line x1="2" y1="10.5" x2="34" y2="10.5" {...strokeProps} strokeWidth="1.6" />
+        <path d="M2 3.5 A 40 40 0 0 1 34 3.5" fill="none" {...strokeProps} strokeWidth="1.6" />
+        <path d="M2 7 A 40 40 0 0 1 34 7" fill="none" {...strokeProps} strokeWidth="1.6" />
+        <path d="M2 10.5 A 40 40 0 0 1 34 10.5" fill="none" {...strokeProps} strokeWidth="1.6" />
       </svg>
     );
   }
   if (kind === "distant") {
     return (
       <svg width="36" height="14" viewBox="0 0 36 14" aria-hidden>
-        <line x1="2" y1="7" x2="34" y2="7" {...strokeProps} strokeWidth="1.6" strokeDasharray="4 3" />
+        <path d="M2 7 A 40 40 0 0 1 34 7" fill="none" {...strokeProps} strokeWidth="1.6" strokeDasharray="4 3" />
       </svg>
     );
   }
   if (kind === "cutoff") {
     return (
       <svg width="36" height="14" viewBox="0 0 36 14" aria-hidden>
-        <line x1="2" y1="7" x2="15" y2="7" {...strokeProps} strokeWidth="1.6" />
-        <line x1="21" y1="7" x2="34" y2="7" {...strokeProps} strokeWidth="1.6" />
-        <line x1="15" y1="3" x2="15" y2="11" {...strokeProps} strokeWidth="1.6" />
-        <line x1="21" y1="3" x2="21" y2="11" {...strokeProps} strokeWidth="1.6" />
+        <line x1="2" y1="7" x2="16" y2="7" {...strokeProps} strokeWidth="1.6" />
+        <line x1="20" y1="7" x2="34" y2="7" {...strokeProps} strokeWidth="1.6" />
+        <line x1="16" y1="3" x2="16" y2="11" {...strokeProps} strokeWidth="1.6" />
+        <line x1="20" y1="3" x2="20" y2="11" {...strokeProps} strokeWidth="1.6" />
       </svg>
     );
   }
   return (
     <svg width="36" height="14" viewBox="0 0 36 14" aria-hidden>
-      <line x1="2" y1="7" x2="30" y2="7" {...strokeProps} strokeWidth="1.6" />
+      <path d="M2 7 A 40 40 0 0 1 30 7" fill="none" {...strokeProps} strokeWidth="1.6" />
       <polygon points="34,7 28,4 28,10" fill={color} fillOpacity={EMOTION_STROKE_OPACITY} />
     </svg>
   );

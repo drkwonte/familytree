@@ -1,8 +1,13 @@
 import {
   CIRCLE_DEATH_MARK_ARM,
   CLOSE_LINE_OFFSET,
+  CONFLICT_AMPLITUDE,
+  CONFLICT_TOOTH_WIDTH,
   coupleYearCaption,
   CUTOFF_GAP,
+  EMOTION_ARC_SAGITTA,
+  EMOTION_ARC_SAGITTA_RATIO,
+  EMOTION_CHILD_CLEARANCE,
   FUSED_LINE_OFFSET,
   CUTOFF_TICK_SIZE,
   DEATH_MARK_INSET,
@@ -24,7 +29,7 @@ import {
   YEAR_COLOR,
   YEAR_GAP_ABOVE,
 } from "./constants";
-import { layoutFamily, type EmotionalLink } from "./layout";
+import { layoutFamily, type ChildDrop, type EmotionalLink } from "./layout";
 import { personCode } from "./relations";
 import type { FamilyGraph, ViewMode } from "./types";
 
@@ -64,17 +69,139 @@ function unitNormal(x1: number, y1: number, x2: number, y2: number): { x: number
   return { x: -dy / length, y: dx / length };
 }
 
-function zigzagAlong(x1: number, y1: number, x2: number, y2: number, amplitude = 5): string {
-  const steps = 16;
+function arcSagitta(length: number): number {
+  return Math.min(EMOTION_ARC_SAGITTA, length * EMOTION_ARC_SAGITTA_RATIO);
+}
+
+function arcRadius(length: number, sagitta: number): number {
+  return (sagitta * sagitta + (length * length) / 4) / (2 * sagitta);
+}
+
+function emotionArc(x1: number, y1: number, x2: number, y2: number, radius?: number): string {
+  const length = Math.hypot(x2 - x1, y2 - y1) || 1;
+  const sagitta = arcSagitta(length);
+  const resolved = radius ?? (sagitta < 1 ? 0 : arcRadius(length, sagitta));
+  if (!resolved) return `M ${x1} ${y1} L ${x2} ${y2}`;
+  return `M ${x1} ${y1} A ${resolved} ${resolved} 0 0 1 ${x2} ${y2}`;
+}
+
+function shiftEnds(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  amount: number,
+): { x1: number; y1: number; x2: number; y2: number } {
   const normal = unitNormal(x1, y1, x2, y2);
+  return {
+    x1: x1 + normal.x * amount,
+    y1: y1 + normal.y * amount,
+    x2: x2 + normal.x * amount,
+    y2: y2 + normal.y * amount,
+  };
+}
+
+function zigzagAlong(x1: number, y1: number, x2: number, y2: number): string {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const length = Math.hypot(dx, dy) || 1;
+  const normal = unitNormal(x1, y1, x2, y2);
+  let steps = Math.max(2, Math.round(length / CONFLICT_TOOTH_WIDTH));
+  if (steps % 2 !== 0) steps += 1;
   const points: string[] = [];
   for (let index = 0; index <= steps; index += 1) {
-    const t = index / steps;
-    const point = pointOnLine(x1, y1, x2, y2, t);
-    const offset = index % 2 === 0 ? amplitude : -amplitude;
+    const point = pointOnLine(x1, y1, x2, y2, index / steps);
+    const atEnd = index === 0 || index === steps;
+    const offset = atEnd ? 0 : index % 2 === 1 ? CONFLICT_AMPLITUDE : -CONFLICT_AMPLITUDE;
     points.push(`${point.x + normal.x * offset},${point.y + normal.y * offset}`);
   }
   return `M ${points.join(" L ")}`;
+}
+
+type Segment = { x1: number; y1: number; x2: number; y2: number };
+
+type Interval = { start: number; end: number };
+
+function childDropSegments(drop: ChildDrop): Segment[] {
+  const offset = drop.fromX != null && drop.elbowY != null && Math.abs(drop.fromX - drop.x) > 0.01;
+  if (!offset || drop.elbowY == null || drop.fromX == null) {
+    return [{ x1: drop.x, y1: drop.fromY, x2: drop.x, y2: drop.toY }];
+  }
+  return [
+    { x1: drop.fromX, y1: drop.fromY, x2: drop.fromX, y2: drop.elbowY },
+    { x1: drop.fromX, y1: drop.elbowY, x2: drop.x, y2: drop.elbowY },
+    { x1: drop.x, y1: drop.elbowY, x2: drop.x, y2: drop.toY },
+  ];
+}
+
+function crossParameter(child: Segment, emotion: Segment): number | null {
+  const denom = (child.x1 - child.x2) * (emotion.y1 - emotion.y2) - (child.y1 - child.y2) * (emotion.x1 - emotion.x2);
+  if (Math.abs(denom) < 1e-6) return null;
+  const t =
+    ((child.x1 - emotion.x1) * (emotion.y1 - emotion.y2) - (child.y1 - emotion.y1) * (emotion.x1 - emotion.x2)) /
+    denom;
+  const u =
+    ((child.x1 - emotion.x1) * (child.y1 - child.y2) - (child.y1 - emotion.y1) * (child.x1 - child.x2)) / denom;
+  if (t <= 0 || t >= 1 || u <= 0 || u >= 1) return null;
+  const x = child.x1 + (child.x2 - child.x1) * t;
+  const y = child.y1 + (child.y2 - child.y1) * t;
+  const nearPerson =
+    Math.hypot(x - emotion.x1, y - emotion.y1) <= NODE_HALF ||
+    Math.hypot(x - emotion.x2, y - emotion.y2) <= NODE_HALF;
+  return nearPerson ? null : t;
+}
+
+function mergeIntervals(intervals: Interval[]): Interval[] {
+  const sorted = [...intervals].sort((left, right) => left.start - right.start);
+  const merged: Interval[] = [];
+  for (const interval of sorted) {
+    const last = merged[merged.length - 1];
+    if (!last || interval.start > last.end) merged.push({ ...interval });
+    else last.end = Math.max(last.end, interval.end);
+  }
+  return merged;
+}
+
+function openChildSegment(segment: Segment, links: EmotionalLink[]): Segment[] {
+  const length = Math.hypot(segment.x2 - segment.x1, segment.y2 - segment.y1) || 1;
+  const gaps = links.flatMap((link) => {
+    const t = crossParameter(segment, {
+      x1: link.source.x,
+      y1: link.source.y,
+      x2: link.target.x,
+      y2: link.target.y,
+    });
+    if (t == null) return [];
+    const half = EMOTION_CHILD_CLEARANCE / length;
+    return [{ start: t - half, end: t + half }];
+  });
+  const blocked = mergeIntervals(gaps);
+  const pieces: Segment[] = [];
+  let cursor = 0;
+  const push = (from: number, to: number) => {
+    if (to - from <= 2 / length) return;
+    pieces.push({
+      x1: segment.x1 + (segment.x2 - segment.x1) * from,
+      y1: segment.y1 + (segment.y2 - segment.y1) * from,
+      x2: segment.x1 + (segment.x2 - segment.x1) * to,
+      y2: segment.y1 + (segment.y2 - segment.y1) * to,
+    });
+  };
+  for (const gap of blocked) {
+    push(cursor, Math.max(0, gap.start));
+    cursor = Math.min(1, gap.end);
+  }
+  push(cursor, 1);
+  return pieces;
+}
+
+function paintChildPieces(drop: ChildDrop, links: EmotionalLink[]): string {
+  const dashed = drop.dashed ? ' stroke-dasharray="5 4"' : "";
+  const paint = `stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"${dashed}`;
+  return childDropSegments(drop)
+    .flatMap((segment) => openChildSegment(segment, links))
+    .map((piece) => `<line x1="${piece.x1}" y1="${piece.y1}" x2="${piece.x2}" y2="${piece.y2}" ${paint}/>`)
+    .join("");
 }
 
 function deathMark(x1: number, y1: number, x2: number, y2: number, x3: number, y3: number, x4: number, y4: number): string {
@@ -212,30 +339,34 @@ function drawEmotion(link: EmotionalLink): string {
   const normal = unitNormal(x1, y1, x2, y2);
 
   if (link.kind === "conflict" || link.kind === "fusedConflict") {
-    return `<path d="${zigzagAlong(x1, y1, x2, y2)}" fill="none" ${paint} stroke-width="${link.kind === "fusedConflict" ? 2.4 : 1.8}"/>`;
+    return `<path d="${zigzagAlong(x1, y1, x2, y2)}" fill="none" ${paint} stroke-width="${link.kind === "fusedConflict" ? 2.4 : 1.8}" stroke-linejoin="miter" stroke-miterlimit="8"/>`;
   }
   if (link.kind === "close") {
-    const ox = normal.x * CLOSE_LINE_OFFSET;
-    const oy = normal.y * CLOSE_LINE_OFFSET;
-    return `<line x1="${x1 - ox}" y1="${y1 - oy}" x2="${x2 - ox}" y2="${y2 - oy}" ${paint} stroke-width="2"/><line x1="${x1 + ox}" y1="${y1 + oy}" x2="${x2 + ox}" y2="${y2 + oy}" ${paint} stroke-width="2"/>`;
+    const left = shiftEnds(x1, y1, x2, y2, -CLOSE_LINE_OFFSET);
+    const right = shiftEnds(x1, y1, x2, y2, CLOSE_LINE_OFFSET);
+    return `<path d="${emotionArc(left.x1, left.y1, left.x2, left.y2)}" fill="none" ${paint} stroke-width="2"/><path d="${emotionArc(right.x1, right.y1, right.x2, right.y2)}" fill="none" ${paint} stroke-width="2"/>`;
   }
   if (link.kind === "fused") {
-    const ox = normal.x * FUSED_LINE_OFFSET;
-    const oy = normal.y * FUSED_LINE_OFFSET;
-    return `<line x1="${x1 - ox}" y1="${y1 - oy}" x2="${x2 - ox}" y2="${y2 - oy}" ${paint} stroke-width="1.8"/><line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${paint} stroke-width="1.8"/><line x1="${x1 + ox}" y1="${y1 + oy}" x2="${x2 + ox}" y2="${y2 + oy}" ${paint} stroke-width="1.8"/>`;
+    const left = shiftEnds(x1, y1, x2, y2, -FUSED_LINE_OFFSET);
+    const right = shiftEnds(x1, y1, x2, y2, FUSED_LINE_OFFSET);
+    return `<path d="${emotionArc(left.x1, left.y1, left.x2, left.y2)}" fill="none" ${paint} stroke-width="1.8"/><path d="${emotionArc(x1, y1, x2, y2)}" fill="none" ${paint} stroke-width="1.8"/><path d="${emotionArc(right.x1, right.y1, right.x2, right.y2)}" fill="none" ${paint} stroke-width="1.8"/>`;
   }
   if (link.kind === "distant") {
-    return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${paint} stroke-width="1.6" stroke-dasharray="5 4"/>`;
+    return `<path d="${emotionArc(x1, y1, x2, y2)}" fill="none" ${paint} stroke-width="1.6" stroke-dasharray="5 4"/>`;
   }
   if (link.kind === "cutoff") {
-    const halfGap = CUTOFF_GAP / 2 / length;
-    const a = pointOnLine(x1, y1, x2, y2, 0.5 - halfGap);
-    const b = pointOnLine(x1, y1, x2, y2, 0.5 + halfGap);
+    const alongX = (x2 - x1) / length;
+    const alongY = (y2 - y1) / length;
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    const halfGap = Math.min(CUTOFF_GAP, length / 4) / 2;
+    const gapStart = { x: midX - alongX * halfGap, y: midY - alongY * halfGap };
+    const gapEnd = { x: midX + alongX * halfGap, y: midY + alongY * halfGap };
     const tick = (point: { x: number; y: number }) =>
       `<line x1="${point.x + normal.x * CUTOFF_TICK_SIZE}" y1="${point.y + normal.y * CUTOFF_TICK_SIZE}" x2="${point.x - normal.x * CUTOFF_TICK_SIZE}" y2="${point.y - normal.y * CUTOFF_TICK_SIZE}" ${paint} stroke-width="1.8"/>`;
-    return `<line x1="${x1}" y1="${y1}" x2="${a.x}" y2="${a.y}" ${paint} stroke-width="1.8"/><line x1="${b.x}" y1="${b.y}" x2="${x2}" y2="${y2}" ${paint} stroke-width="1.8"/>${tick(a)}${tick(b)}`;
+    return `<line x1="${x1}" y1="${y1}" x2="${gapStart.x}" y2="${gapStart.y}" ${paint} stroke-width="1.8"/><line x1="${gapEnd.x}" y1="${gapEnd.y}" x2="${x2}" y2="${y2}" ${paint} stroke-width="1.8"/>${tick(gapStart)}${tick(gapEnd)}`;
   }
-  return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" ${paint} stroke-width="1.8"/>`;
+  return `<path d="${emotionArc(x1, y1, x2, y2)}" fill="none" ${paint} stroke-width="1.8"/>`;
 }
 
 export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "edit"): string {
@@ -263,16 +394,7 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
   }
 
   for (const drop of layout.childDrops) {
-    const dashed = drop.dashed ? ' stroke-dasharray="5 4"' : "";
-    const paint = `stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"${dashed}`;
-    const offset = drop.fromX != null && Math.abs(drop.fromX - drop.x) > 0.01;
-    if (offset && drop.elbowY != null) {
-      layers.push(
-        `<path d="M ${drop.fromX} ${drop.fromY} L ${drop.fromX} ${drop.elbowY} L ${drop.x} ${drop.elbowY} L ${drop.x} ${drop.toY}" fill="none" ${paint}/>`,
-      );
-    } else {
-      layers.push(`<line x1="${drop.x}" y1="${drop.fromY}" x2="${drop.x}" y2="${drop.toY}" ${paint}/>`);
-    }
+    layers.push(paintChildPieces(drop, layout.emotional));
   }
 
   for (const link of layout.emotional) {

@@ -17,10 +17,41 @@ const VIEW_MODE_EDIT: ViewMode = "edit";
 const VIEW_MODE_OUTPUT: ViewMode = "final";
 const SIDEBAR_FORM = "form";
 const SIDEBAR_CHAT = "chat";
-const INTERACTION_CHAT_LABEL = "인물 간 상호작용 추가";
+const PERSON_PANEL_LABEL = "인물정보";
+const INTERACTION_PANEL_LABEL = "인물 간 상호작용";
 
 const MODE_TOGGLE_ITEM_CLASS =
   "rounded-md px-3 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary/90";
+const SIDEBAR_MODE_ITEM_CLASS =
+  "min-w-0 flex-1 shrink rounded-md px-2 aria-pressed:bg-primary! aria-pressed:text-primary-foreground! aria-pressed:hover:bg-primary/90!";
+
+function SidebarModeSwitch({
+  panel,
+  onChange,
+}: {
+  panel: typeof SIDEBAR_FORM | typeof SIDEBAR_CHAT;
+  onChange: (panel: typeof SIDEBAR_FORM | typeof SIDEBAR_CHAT) => void;
+}) {
+  return (
+    <ToggleGroup
+      value={[panel]}
+      variant="outline"
+      spacing={0}
+      className="w-full rounded-lg border p-0.5"
+      onValueChange={(values) => {
+        const next = values[0];
+        if (next === SIDEBAR_FORM || next === SIDEBAR_CHAT) onChange(next);
+      }}
+    >
+      <ToggleGroupItem value={SIDEBAR_FORM} className={SIDEBAR_MODE_ITEM_CLASS}>
+        {PERSON_PANEL_LABEL}
+      </ToggleGroupItem>
+      <ToggleGroupItem value={SIDEBAR_CHAT} className={SIDEBAR_MODE_ITEM_CLASS}>
+        {INTERACTION_PANEL_LABEL}
+      </ToggleGroupItem>
+    </ToggleGroup>
+  );
+}
 
 export function Studio() {
   const graph = useFamilyStore((state) => state.graph);
@@ -114,21 +145,15 @@ export function Studio() {
       </header>
       <div className="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-cols-[420px_minmax(0,1fr)] lg:grid-rows-1">
         <aside className="flex min-h-0 flex-col overflow-hidden border-r bg-sidebar">
+          <div className="shrink-0 px-5 pt-5">
+            <SidebarModeSwitch panel={sidebarPanel} onChange={setSidebarPanel} />
+          </div>
           {sidebarPanel === SIDEBAR_CHAT ? (
-            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-5">
-              <div className="flex shrink-0 items-center justify-between gap-2">
-                <h3 className="text-lg font-semibold">{INTERACTION_CHAT_LABEL}</h3>
-                <Button variant="outline" size="sm" onClick={() => setSidebarPanel(SIDEBAR_FORM)}>
-                  인물 폼
-                </Button>
-              </div>
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-5">
               <ChatPanel />
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-auto p-5">
-              <Button className="shrink-0" onClick={() => setSidebarPanel(SIDEBAR_CHAT)}>
-                {INTERACTION_CHAT_LABEL}
-              </Button>
+            <div className="min-h-0 flex-1 overflow-auto p-5">
               <PersonForm />
             </div>
           )}
