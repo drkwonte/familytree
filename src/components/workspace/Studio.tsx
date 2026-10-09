@@ -2,6 +2,7 @@
 
 import { Redo2, Undo2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { CollateralScalePicker } from "@/components/genogram/CollateralScalePicker";
 import { EmotionLegend } from "@/components/genogram/EmotionLegend";
 import { GenogramCanvas } from "@/components/genogram/GenogramCanvas";
 import { ChatPanel } from "@/components/panel/ChatPanel";
@@ -9,7 +10,10 @@ import { PersonForm } from "@/components/panel/PersonForm";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { ClientSessionBar } from "@/components/workspace/ClientSessionBar";
 import { ExportActions } from "@/components/workspace/ExportActions";
+import { UnsavedChangesDialog } from "@/components/workspace/UnsavedChangesDialog";
+import { useUnsavedChangesGuard } from "@/components/workspace/use-unsaved-changes";
 import type { ViewMode } from "@/lib/genogram/types";
 import { useFamilyStore } from "@/store/family-store";
 
@@ -20,6 +24,7 @@ const SIDEBAR_CHAT = "chat" as const;
 type SidebarPanel = typeof SIDEBAR_FORM | typeof SIDEBAR_CHAT;
 const PERSON_PANEL_LABEL = "인물정보";
 const INTERACTION_PANEL_LABEL = "인물 간 상호작용";
+const RESET_CONFIRM_MESSAGE = "캔버스의 모든 인물과 관계를 지울까요? 저장하기 전에는 되돌리기로 복구할 수 있습니다.";
 
 const MODE_TOGGLE_ITEM_CLASS =
   "rounded-md px-3 data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary/90";
@@ -57,7 +62,6 @@ function SidebarModeSwitch({
 export function Studio() {
   const graph = useFamilyStore((state) => state.graph);
   const viewMode = useFamilyStore((state) => state.viewMode);
-  const selectedPersonId = useFamilyStore((state) => state.selectedPersonId);
   const selectPerson = useFamilyStore((state) => state.selectPerson);
   const reset = useFamilyStore((state) => state.reset);
   const undo = useFamilyStore((state) => state.undo);
@@ -67,10 +71,16 @@ export function Studio() {
   const setViewMode = useFamilyStore((state) => state.setViewMode);
   const [sidebarPanel, setSidebarPanel] = useState<SidebarPanel>(SIDEBAR_FORM);
   const [legendOpen, setLegendOpen] = useState(true);
+  useUnsavedChangesGuard();
 
-  useEffect(() => {
-    if (selectedPersonId) setSidebarPanel(SIDEBAR_FORM);
-  }, [selectedPersonId]);
+  function confirmReset() {
+    if (window.confirm(RESET_CONFIRM_MESSAGE)) reset();
+  }
+
+  function openPersonEditor(personId: string) {
+    selectPerson(personId);
+    setSidebarPanel(SIDEBAR_FORM);
+  }
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -118,7 +128,7 @@ export function Studio() {
               <Redo2 />
               다시 실행
             </Button>
-            <Button variant="ghost" size="sm" onClick={reset}>
+            <Button variant="ghost" size="sm" disabled={graph.nodes.length === 0} onClick={confirmReset}>
               캔버스 지우기
             </Button>
             <span className="text-sm font-medium text-muted-foreground">모드변경</span>
@@ -143,6 +153,7 @@ export function Studio() {
             </ToggleGroup>
           </div>
         </div>
+        <ClientSessionBar />
       </header>
       <div className="grid min-h-0 flex-1 grid-rows-2 overflow-hidden lg:grid-cols-[420px_minmax(0,1fr)] lg:grid-rows-1">
         <aside className="flex min-h-0 flex-col overflow-hidden border-r bg-sidebar">
@@ -160,8 +171,11 @@ export function Studio() {
           )}
         </aside>
         <main className="flex min-h-0 flex-col overflow-hidden bg-[var(--genogram-paper)]">
-          <div className="min-h-0 flex-1 overflow-hidden">
-            <GenogramCanvas graph={graph} viewMode={viewMode} onSelectPerson={selectPerson} />
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            <GenogramCanvas graph={graph} viewMode={viewMode} onSelectPerson={openPersonEditor} />
+            <div className="absolute bottom-3 left-3">
+              <CollateralScalePicker graph={graph} />
+            </div>
           </div>
           <div className="shrink-0 border-t bg-[var(--genogram-paper)]">
             <div className="flex items-center justify-between gap-3 px-4 py-1.5">
@@ -189,6 +203,7 @@ export function Studio() {
           </div>
         </main>
       </div>
+      <UnsavedChangesDialog />
     </div>
   );
 }

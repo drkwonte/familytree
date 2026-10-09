@@ -1,7 +1,12 @@
 "use client";
 
-import { Studio } from "@/components/workspace/Studio";
+import { AuthGate } from "@/components/auth/AuthGate";
+import { Workspace } from "@/components/workspace/Workspace";
 
 export default function HomePage() {
-  return <Studio />;
+  return (
+    <AuthGate>
+      <Workspace />
+    </AuthGate>
+  );
 }

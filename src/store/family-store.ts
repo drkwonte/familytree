@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { addRelative, deletePerson, ensureDisplayNumbers, updatePerson } from "@/lib/genogram/relations";
 import { pushGraphHistory, redoGraphChange, snapshotGraph, undoGraphChange } from "@/lib/genogram/history";
 import {
+  type CollateralScale,
   EMPTY_GRAPH,
   type FamilyGraph,
   type Gender,
@@ -46,13 +47,33 @@ type FamilyStore = {
   updatePerson: (personId: string, patch: Partial<PersonData>) => void;
   deletePerson: (personId: string) => void;
   replaceGraph: (graph: FamilyGraph, note: string) => void;
+  /** Opens a saved genogram; undo history and chat belong to the previous client, so both start fresh. */
+  loadGraph: (graph: FamilyGraph) => void;
   reset: () => void;
+  setCollateralScale: (scale: CollateralScale) => void;
   undo: () => void;
   redo: () => void;
   setViewMode: (mode: ViewMode) => void;
   setThinking: (value: boolean) => void;
   appendChat: (turn: ChatTurn) => void;
 };
+
+function createInitialChat(): ChatTurn[] {
+  return [
+    {
+      id: "welcome",
+      role: "assistant",
+      content:
+        "누구와 누구 사이인지 인물 번호로 분명히 적어 주세요. 예: 인물1과 인물2 사이에 갈등 표시해줘. 인물5와 인물7 사이에 단절 표시해줘.",
+    },
+  ];
+}
+
+/** The collateral size is a drawing choice for this genogram, so rebuilding its people must not reset it. */
+function keepCollateralScale(next: FamilyGraph, current: FamilyGraph): FamilyGraph {
+  const collateralScale = next.collateralScale ?? current.collateralScale;
+  return collateralScale === undefined ? next : { ...next, collateralScale };
+}
 
 function keepSelection(selectedPersonId: string | null, graph: FamilyGraph): string | null {
   if (!selectedPersonId) return null;
@@ -65,15 +86,17 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
   future: [],
   viewMode: "edit",
   selectedPersonId: null,
-  chat: [
-    {
-      id: "welcome",
-      role: "assistant",
-      content:
-        "누구와 누구 사이인지 인물 번호로 분명히 적어 주세요. 예: 인물1과 인물2 사이에 갈등 표시해줘. 인물5와 인물7 사이에 단절 표시해줘.",
-    },
-  ],
+  chat: createInitialChat(),
   isThinking: false,
+  loadGraph: (graph) =>
+    set({
+      graph: ensureDisplayNumbers(snapshotGraph(graph)),
+      past: [],
+      future: [],
+      selectedPersonId: null,
+      chat: createInitialChat(),
+      isThinking: false,
+    }),
   selectPerson: (personId) => set({ selectedPersonId: personId }),
   addPerson: (input) =>
     set((state) => ({
@@ -101,7 +124,7 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
     set((state) => ({
       past: pushGraphHistory(state.past, state.graph),
       future: [],
-      graph: ensureDisplayNumbers(graph),
+      graph: ensureDisplayNumbers(keepCollateralScale(graph, state.graph)),
       selectedPersonId: keepSelection(state.selectedPersonId, graph),
       chat: [
         ...state.chat,
@@ -112,9 +135,18 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
     set((state) => ({
       past: pushGraphHistory(state.past, state.graph),
       future: [],
-      graph: snapshotGraph(EMPTY_GRAPH),
+      graph: keepCollateralScale(snapshotGraph(EMPTY_GRAPH), state.graph),
       selectedPersonId: null,
     })),
+  setCollateralScale: (collateralScale) =>
+    set((state) => {
+      if (state.graph.collateralScale === collateralScale) return state;
+      return {
+        past: pushGraphHistory(state.past, state.graph),
+        future: [],
+        graph: { ...state.graph, collateralScale },
+      };
+    }),
   undo: () =>
     set((state) => {
       const next = undoGraphChange(state.past, state.future, state.graph);
