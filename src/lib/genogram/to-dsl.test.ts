@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   CIRCLE_DEATH_MARK_ARM,
+  COLLATERAL_SCALE,
   CONFLICT_AMPLITUDE,
   CONFLICT_TOOTH_WIDTH,
   CUTOFF_GAP,
   CUTOFF_TICK_SIZE,
   DEATH_MARK_INSET,
-  EMOTION_CHILD_CLEARANCE,
+  EMOTION_ARROW_CLEARANCE,
+  EMOTION_COLORS,
   NODE_HALF,
 } from "./constants";
 import { renderFamilyGraphSvg } from "./draw";
@@ -72,14 +74,14 @@ test("saving a person keeps the birth year on the canvas", () => {
   assert.match(renderFamilyGraphSvg(graph, "edit"), /1969/);
 });
 
-test("the couple shares a baseline and collateral siblings sit higher", () => {
+test("the couple and the client's siblings share a baseline", () => {
   const graph = seedDemoGraph();
   const layout = layoutFamily(graph);
   const index = layout.nodes.find((node) => node.data.isIndexPerson)!;
   const spouse = layout.nodes.find((node) => node.data.name === "배우자")!;
   const brother = layout.nodes.find((node) => node.data.name === "오빠")!;
   assert.equal(spouse.y, index.y);
-  assert.ok(brother.y < index.y);
+  assert.equal(brother.y, index.y);
   const firstEmotion = graph.edges.find((edge) => edge.category === "emotional")!;
   const source = layout.nodes.find((node) => node.id === firstEmotion.source)!;
   const laid = layout.emotional.find((link) => link.id === firstEmotion.id)!;
@@ -113,7 +115,7 @@ test("adds parent without requiring a visible kinship label", () => {
 });
 
 test("deceased male X reaches the square corners", () => {
-  let graph = addRelative(EMPTY_GRAPH, {
+  const graph = addRelative(EMPTY_GRAPH, {
     name: "",
     gender: "M",
     relation: "self",
@@ -265,6 +267,37 @@ test("a conflict line keeps sharp teeth on a long span", () => {
   }
 });
 
+test("collateral relatives are drawn smaller than the direct line", () => {
+  let graph = addRelative(EMPTY_GRAPH, {
+    name: "",
+    gender: "F",
+    relation: "self",
+    isIndexPerson: true,
+    age: 15,
+  });
+  const clientId = graph.nodes[0].id;
+  graph = addRelative(graph, { name: "", gender: "M", relation: "father", anchorId: clientId, age: 47 });
+  const fatherId = graph.nodes.find((node) => node.data.age === 47)!.id;
+  graph = addRelative(graph, { name: "", gender: "M", relation: "sibling", anchorId: clientId, age: 13 });
+  const brother = graph.nodes.find((node) => node.data.age === 13)!;
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "father",
+    anchorId: fatherId,
+    age: 80,
+  });
+  graph = addRelative(graph, { name: "", gender: "M", relation: "sibling", anchorId: fatherId, age: 52 });
+  const uncle = graph.nodes.find((node) => node.data.age === 52)!;
+  const svg = renderFamilyGraphSvg(graph, "edit");
+  const group = (id: string) => svg.slice(svg.indexOf(`data-person-id="${id}"`), svg.indexOf("</g>", svg.indexOf(`data-person-id="${id}"`)));
+  assert.equal(group(clientId).includes(`scale(${COLLATERAL_SCALE})`), false);
+  assert.equal(group(brother.id).includes(`scale(${COLLATERAL_SCALE})`), false);
+  assert.equal(group(uncle.id).includes(`scale(${COLLATERAL_SCALE})`), true);
+  const brotherDrop = [...svg.matchAll(/stroke-width="([^"]+)"/g)].map((match) => Number(match[1]));
+  assert.ok(brotherDrop.some((width) => Math.abs(width - 1.7 * COLLATERAL_SCALE) < 0.01));
+});
+
 test("a cutoff is a solid line with a short break in the middle", () => {
   let graph = addRelative(EMPTY_GRAPH, {
     name: "",
@@ -340,7 +373,7 @@ test("a cutoff is a solid line with a short break in the middle", () => {
   assert.ok(Math.abs(Math.max(...tickCenters) - innerEnds[1]) < 0.01);
 });
 
-test("a child line opens where a relationship line crosses it", () => {
+test("a relationship line passes beneath an unbroken child line", () => {
   let graph = addRelative(EMPTY_GRAPH, {
     name: "",
     gender: "M",
@@ -390,16 +423,68 @@ test("a child line opens where a relationship line crosses it", () => {
       y2: Number(match[4]),
     }))
     .filter((line) => Math.abs(line.x1 - drop.x) < 0.01 && Math.abs(line.x2 - drop.x) < 0.01);
-  assert.equal(onDrop.length, 2);
-  const coversCrossing = onDrop.some((line) => {
-    const top = Math.min(line.y1, line.y2);
-    const bottom = Math.max(line.y1, line.y2);
-    return top < crossY && bottom > crossY;
+  assert.equal(onDrop.length, 1);
+  const top = Math.min(onDrop[0].y1, onDrop[0].y2);
+  const bottom = Math.max(onDrop[0].y1, onDrop[0].y2);
+  assert.ok(top < crossY && bottom > crossY);
+  const relationshipAt = svg.indexOf(`stroke="${EMOTION_COLORS.cutoff}"`);
+  const childLineAt = svg.indexOf(`<line x1="${drop.x}"`);
+  assert.ok(relationshipAt >= 0 && relationshipAt < childLineAt, "relationship lines are painted first");
+});
+
+function arrowheadsIn(svg: string, color: string) {
+  return [...svg.matchAll(new RegExp(`<polygon points="([^"]+)" fill="${color}"`, "g"))].map((match) =>
+    match[1].split(" ").map((pair) => {
+      const [x, y] = pair.split(",").map(Number);
+      return { x, y };
+    }),
+  );
+}
+
+test("an over-involvement arrow shows its head just outside the person it points to", () => {
+  let graph = addRelative(EMPTY_GRAPH, {
+    name: "",
+    gender: "M",
+    relation: "self",
+    isIndexPerson: true,
+    age: 15,
   });
-  assert.equal(coversCrossing, false);
-  const above = onDrop.flatMap((line) => [line.y1, line.y2]).filter((y) => y < crossY);
-  const below = onDrop.flatMap((line) => [line.y1, line.y2]).filter((y) => y > crossY);
-  const gapTop = Math.max(...above);
-  const gapBottom = Math.min(...below);
-  assert.ok(gapBottom - gapTop >= EMOTION_CHILD_CLEARANCE * 2 - 0.1);
+  const client = graph.nodes[0].id;
+  graph = addRelative(graph, { name: "", gender: "M", relation: "father", anchorId: client, age: 47 });
+  graph = addRelative(graph, { name: "", gender: "F", relation: "mother", anchorId: client, age: 45 });
+  const mother = graph.nodes.find((node) => node.data.age === 45)!;
+  graph = {
+    ...graph,
+    edges: [
+      ...graph.edges,
+      { id: "focus", source: mother.id, target: client, category: "emotional", kind: "focused" },
+    ],
+  };
+  const layout = layoutFamily(graph);
+  const target = layout.nodes.find((node) => node.id === client)!;
+  const heads = arrowheadsIn(renderFamilyGraphSvg(graph, "edit"), EMOTION_COLORS.focused);
+  assert.equal(heads.length, 1);
+  const outsideSquare = (point: { x: number; y: number }) =>
+    Math.max(Math.abs(point.x - target.x), Math.abs(point.y - target.y));
+  for (const corner of heads[0]) {
+    assert.ok(outsideSquare(corner) > NODE_HALF, `arrowhead corner ${corner.x},${corner.y} is inside the glyph`);
+  }
+  const tip = heads[0].reduce((nearest, corner) =>
+    outsideSquare(corner) < outsideSquare(nearest) ? corner : nearest,
+  );
+  assert.ok(outsideSquare(tip) <= NODE_HALF + EMOTION_ARROW_CLEARANCE + 0.01);
+});
+
+test("only directional relationships draw an arrowhead", () => {
+  let graph = addRelative(EMPTY_GRAPH, { name: "", gender: "M", relation: "self", isIndexPerson: true });
+  graph = addRelative(graph, { name: "", gender: "F", relation: "spouse", anchorId: graph.nodes[0].id });
+  const [husband, wife] = graph.nodes;
+  graph = {
+    ...graph,
+    edges: [
+      ...graph.edges,
+      { id: "close", source: husband.id, target: wife.id, category: "emotional", kind: "close" },
+    ],
+  };
+  assert.equal(arrowheadsIn(renderFamilyGraphSvg(graph, "edit"), EMOTION_COLORS.close).length, 0);
 });

@@ -1,13 +1,18 @@
 import {
+  AGE_BASELINE_OFFSET,
+  AGE_FONT_SIZE,
   CIRCLE_DEATH_MARK_ARM,
   CLOSE_LINE_OFFSET,
   CONFLICT_AMPLITUDE,
   CONFLICT_TOOTH_WIDTH,
   coupleYearCaption,
   CUTOFF_GAP,
+  DROP_LENGTH,
   EMOTION_ARC_SAGITTA,
   EMOTION_ARC_SAGITTA_RATIO,
-  EMOTION_CHILD_CLEARANCE,
+  EMOTION_ARROW_CLEARANCE,
+  EMOTION_ARROW_HALF_WIDTH,
+  EMOTION_ARROW_LENGTH,
   FUSED_LINE_OFFSET,
   CUTOFF_TICK_SIZE,
   DEATH_MARK_INSET,
@@ -29,9 +34,9 @@ import {
   YEAR_COLOR,
   YEAR_GAP_ABOVE,
 } from "./constants";
-import { layoutFamily, type ChildDrop, type EmotionalLink } from "./layout";
+import { directLineIds, layoutFamily, type ChildDrop, type CoupleBar, type EmotionalLink } from "./layout";
 import { personCode } from "./relations";
-import type { FamilyGraph, ViewMode } from "./types";
+import { type FamilyGraph, isDirectionalEmotion, type PersonData, type ViewMode } from "./types";
 
 function escapeXml(value: string): string {
   return value
@@ -77,12 +82,82 @@ function arcRadius(length: number, sagitta: number): number {
   return (sagitta * sagitta + (length * length) / 4) / (2 * sagitta);
 }
 
-function emotionArc(x1: number, y1: number, x2: number, y2: number, radius?: number): string {
+type Point = { x: number; y: number };
+
+type ArcCircle = { center: Point; radius: number };
+
+/** Circle a relationship line bends along; null when the line is short enough to stay straight. */
+function emotionArcCircle(x1: number, y1: number, x2: number, y2: number): ArcCircle | null {
   const length = Math.hypot(x2 - x1, y2 - y1) || 1;
   const sagitta = arcSagitta(length);
-  const resolved = radius ?? (sagitta < 1 ? 0 : arcRadius(length, sagitta));
+  if (sagitta < 1) return null;
+  const radius = arcRadius(length, sagitta);
+  const normal = unitNormal(x1, y1, x2, y2);
+  const centerOffset = radius - sagitta;
+  // The arc's sweep flag turns clockwise on screen, so its center is the side the end lies clockwise of.
+  for (const side of [1, -1]) {
+    const center = {
+      x: (x1 + x2) / 2 + normal.x * centerOffset * side,
+      y: (y1 + y2) / 2 + normal.y * centerOffset * side,
+    };
+    const turn = (x1 - center.x) * (y2 - center.y) - (y1 - center.y) * (x2 - center.x);
+    if (turn > 0) return { center, radius };
+  }
+  return null;
+}
+
+function emotionArc(x1: number, y1: number, x2: number, y2: number, radius?: number): string {
+  const resolved = radius ?? emotionArcCircle(x1, y1, x2, y2)?.radius ?? 0;
   if (!resolved) return `M ${x1} ${y1} L ${x2} ${y2}`;
   return `M ${x1} ${y1} A ${resolved} ${resolved} 0 0 1 ${x2} ${y2}`;
+}
+
+/** Point `distance` back from the end along the drawn line, following its arc when it bends. */
+function pointBeforeEnd(start: Point, end: Point, circle: ArcCircle | null, distance: number): Point {
+  if (!circle) {
+    const length = Math.hypot(end.x - start.x, end.y - start.y) || 1;
+    return {
+      x: end.x - ((end.x - start.x) / length) * distance,
+      y: end.y - ((end.y - start.y) / length) * distance,
+    };
+  }
+  const endAngle = Math.atan2(end.y - circle.center.y, end.x - circle.center.x);
+  const angle = endAngle - distance / circle.radius;
+  return {
+    x: circle.center.x + circle.radius * Math.cos(angle),
+    y: circle.center.y + circle.radius * Math.sin(angle),
+  };
+}
+
+type ArrowTarget = { data: PersonData; scale: number };
+
+/** Distance from an unscaled glyph's center to its outline along a unit direction. */
+function glyphOutlineDistance(data: PersonData, direction: Point): number {
+  const across = Math.abs(direction.x);
+  const down = Math.abs(direction.y);
+  const isBoxed = data.vitalStatus === "pregnancy" || (data.vitalStatus !== "miscarriage" && data.gender === "M");
+  if (isBoxed) return NODE_HALF / Math.max(across, down);
+  const isDiamond = data.vitalStatus !== "miscarriage" && data.gender === "U";
+  if (isDiamond) return NODE_HALF / (across + down);
+  return NODE_HALF;
+}
+
+/** The line stops short of the receiving person so the arrowhead sits whole outside that glyph. */
+function drawDirectedEmotion(link: EmotionalLink, color: string, target: ArrowTarget): string {
+  const start = link.source;
+  const end = link.target;
+  const circle = emotionArcCircle(start.x, start.y, end.x, end.y);
+  const approach = pointBeforeEnd(start, end, circle, NODE_HALF * target.scale);
+  const approachLength = Math.hypot(approach.x - end.x, approach.y - end.y) || 1;
+  const direction = { x: (approach.x - end.x) / approachLength, y: (approach.y - end.y) / approachLength };
+  const tipDistance = glyphOutlineDistance(target.data, direction) * target.scale + EMOTION_ARROW_CLEARANCE;
+  const tip = pointBeforeEnd(start, end, circle, tipDistance);
+  const base = pointBeforeEnd(start, end, circle, tipDistance + EMOTION_ARROW_LENGTH);
+  const wing = unitNormal(base.x, base.y, tip.x, tip.y);
+  const left = { x: base.x + wing.x * EMOTION_ARROW_HALF_WIDTH, y: base.y + wing.y * EMOTION_ARROW_HALF_WIDTH };
+  const right = { x: base.x - wing.x * EMOTION_ARROW_HALF_WIDTH, y: base.y - wing.y * EMOTION_ARROW_HALF_WIDTH };
+  const line = emotionArc(start.x, start.y, base.x, base.y, circle?.radius ?? 0);
+  return `<path d="${line}" fill="none" ${emotionPaint(color)} stroke-width="1.8"/><polygon points="${tip.x},${tip.y} ${left.x},${left.y} ${right.x},${right.y}" fill="${color}" fill-opacity="${EMOTION_STROKE_OPACITY}"/>`;
 }
 
 function shiftEnds(
@@ -120,8 +195,6 @@ function zigzagAlong(x1: number, y1: number, x2: number, y2: number): string {
 
 type Segment = { x1: number; y1: number; x2: number; y2: number };
 
-type Interval = { start: number; end: number };
-
 function childDropSegments(drop: ChildDrop): Segment[] {
   const offset = drop.fromX != null && drop.elbowY != null && Math.abs(drop.fromX - drop.x) > 0.01;
   if (!offset || drop.elbowY == null || drop.fromX == null) {
@@ -134,72 +207,10 @@ function childDropSegments(drop: ChildDrop): Segment[] {
   ];
 }
 
-function crossParameter(child: Segment, emotion: Segment): number | null {
-  const denom = (child.x1 - child.x2) * (emotion.y1 - emotion.y2) - (child.y1 - child.y2) * (emotion.x1 - emotion.x2);
-  if (Math.abs(denom) < 1e-6) return null;
-  const t =
-    ((child.x1 - emotion.x1) * (emotion.y1 - emotion.y2) - (child.y1 - emotion.y1) * (emotion.x1 - emotion.x2)) /
-    denom;
-  const u =
-    ((child.x1 - emotion.x1) * (child.y1 - child.y2) - (child.y1 - emotion.y1) * (child.x1 - child.x2)) / denom;
-  if (t <= 0 || t >= 1 || u <= 0 || u >= 1) return null;
-  const x = child.x1 + (child.x2 - child.x1) * t;
-  const y = child.y1 + (child.y2 - child.y1) * t;
-  const nearPerson =
-    Math.hypot(x - emotion.x1, y - emotion.y1) <= NODE_HALF ||
-    Math.hypot(x - emotion.x2, y - emotion.y2) <= NODE_HALF;
-  return nearPerson ? null : t;
-}
-
-function mergeIntervals(intervals: Interval[]): Interval[] {
-  const sorted = [...intervals].sort((left, right) => left.start - right.start);
-  const merged: Interval[] = [];
-  for (const interval of sorted) {
-    const last = merged[merged.length - 1];
-    if (!last || interval.start > last.end) merged.push({ ...interval });
-    else last.end = Math.max(last.end, interval.end);
-  }
-  return merged;
-}
-
-function openChildSegment(segment: Segment, links: EmotionalLink[]): Segment[] {
-  const length = Math.hypot(segment.x2 - segment.x1, segment.y2 - segment.y1) || 1;
-  const gaps = links.flatMap((link) => {
-    const t = crossParameter(segment, {
-      x1: link.source.x,
-      y1: link.source.y,
-      x2: link.target.x,
-      y2: link.target.y,
-    });
-    if (t == null) return [];
-    const half = EMOTION_CHILD_CLEARANCE / length;
-    return [{ start: t - half, end: t + half }];
-  });
-  const blocked = mergeIntervals(gaps);
-  const pieces: Segment[] = [];
-  let cursor = 0;
-  const push = (from: number, to: number) => {
-    if (to - from <= 2 / length) return;
-    pieces.push({
-      x1: segment.x1 + (segment.x2 - segment.x1) * from,
-      y1: segment.y1 + (segment.y2 - segment.y1) * from,
-      x2: segment.x1 + (segment.x2 - segment.x1) * to,
-      y2: segment.y1 + (segment.y2 - segment.y1) * to,
-    });
-  };
-  for (const gap of blocked) {
-    push(cursor, Math.max(0, gap.start));
-    cursor = Math.min(1, gap.end);
-  }
-  push(cursor, 1);
-  return pieces;
-}
-
-function paintChildPieces(drop: ChildDrop, links: EmotionalLink[]): string {
+function paintChildDrop(drop: ChildDrop, strokeWidth: number): string {
   const dashed = drop.dashed ? ' stroke-dasharray="5 4"' : "";
-  const paint = `stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"${dashed}`;
+  const paint = `stroke="${STRUCTURE_COLOR}" stroke-width="${strokeWidth}"${dashed}`;
   return childDropSegments(drop)
-    .flatMap((segment) => openChildSegment(segment, links))
     .map((piece) => `<line x1="${piece.x1}" y1="${piece.y1}" x2="${piece.x2}" y2="${piece.y2}" ${paint}/>`)
     .join("");
 }
@@ -254,11 +265,9 @@ function deceasedDiamondMark(x: number, y: number): string {
   return deathMark(x, y - NODE_HALF + inset, x, y + NODE_HALF - inset, x + NODE_HALF - inset, y, x - NODE_HALF + inset, y);
 }
 
-function personShape(node: {
-  x: number;
-  y: number;
-  data: FamilyGraph["nodes"][number]["data"];
-}): string {
+type PlacedPerson = { x: number; y: number; data: PersonData };
+
+function personShape(node: PlacedPerson): string {
   const { x, y, data } = node;
   const parts: string[] = [];
   if (data.vitalStatus === "pregnancy") {
@@ -282,12 +291,20 @@ function personShape(node: {
     else if (data.gender === "M") parts.push(deceasedMaleMark(x, y));
     else parts.push(deceasedDiamondMark(x, y));
   }
-  if (data.age !== undefined && data.vitalStatus !== "miscarriage") {
-    parts.push(
-      `<text x="${x}" y="${y + 4}" text-anchor="middle" font-size="12" fill="${STRUCTURE_COLOR}">${data.age}</text>`,
-    );
-  }
   return parts.join("");
+}
+
+/** Drawn outside any glyph scaling: a shrunken collateral person must keep a readable age. */
+function ageCaption(node: PlacedPerson): string {
+  const { x, y, data } = node;
+  if (data.age === undefined || data.vitalStatus === "miscarriage") return "";
+  return `<text x="${x}" y="${y + AGE_BASELINE_OFFSET}" text-anchor="middle" font-size="${AGE_FONT_SIZE}" fill="${STRUCTURE_COLOR}">${data.age}</text>`;
+}
+
+function scaledPersonShape(node: PlacedPerson, scale: number): string {
+  const shape = personShape(node);
+  if (scale === 1) return shape;
+  return `<g transform="translate(${node.x} ${node.y}) scale(${scale}) translate(${-node.x} ${-node.y})">${shape}</g>`;
 }
 
 function labeledText(
@@ -327,8 +344,9 @@ function emotionPaint(color: string): string {
   return `stroke="${color}" stroke-opacity="${EMOTION_STROKE_OPACITY}"`;
 }
 
-function drawEmotion(link: EmotionalLink): string {
+function drawEmotion(link: EmotionalLink, target: ArrowTarget | null): string {
   const color = EMOTION_COLORS[String(link.kind)] ?? "#fda4af";
+  if (target && isDirectionalEmotion(String(link.kind))) return drawDirectedEmotion(link, color, target);
   const paint = emotionPaint(color);
   const { x1, y1, x2, y2, length } = lineSegment(
     link.source.x,
@@ -369,9 +387,38 @@ function drawEmotion(link: EmotionalLink): string {
   return `<path d="${emotionArc(x1, y1, x2, y2)}" fill="none" ${paint} stroke-width="1.8"/>`;
 }
 
+function personScale(directLine: Set<string>, personId: string, collateralScale: number): number {
+  return directLine.has(personId) ? 1 : collateralScale;
+}
+
+function coupleLineScale(directLine: Set<string>, bar: CoupleBar, collateralScale: number): number {
+  return directLine.has(bar.leftId) && directLine.has(bar.rightId) ? 1 : collateralScale;
+}
+
+function drawnCoupleBarY(directLine: Set<string>, bar: CoupleBar, collateralScale: number): number {
+  const scale = coupleLineScale(directLine, bar, collateralScale);
+  const glyph = Math.max(
+    personScale(directLine, bar.leftId, collateralScale),
+    personScale(directLine, bar.rightId, collateralScale),
+  );
+  return bar.leftCenterY + NODE_HALF * glyph + DROP_LENGTH * scale;
+}
+
 export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "edit"): string {
   const layout = layoutFamily(graph);
+  const directLine = directLineIds(graph);
   const layers: string[] = [];
+  const nodesById = new Map(layout.nodes.map((node) => [node.id, node]));
+
+  // Relationship lines run center to center on the bottom layer; every structural line and
+  // glyph is painted over them, so a crossing never breaks family lines.
+  for (const link of layout.emotional) {
+    const target = nodesById.get(link.targetId);
+    const arrowTarget = target
+      ? { data: target.data, scale: personScale(directLine, target.id, layout.collateralScale) }
+      : null;
+    layers.push(drawEmotion(link, arrowTarget));
+  }
 
   for (const box of layout.householdBoxes) {
     layers.push(
@@ -381,35 +428,58 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
 
   for (const bar of layout.coupleBars) {
     const dashed = bar.kind === "cohabitation" || bar.kind === "affair" ? ' stroke-dasharray="5 4"' : "";
+    const barY = drawnCoupleBarY(directLine, bar, layout.collateralScale);
+    const strokeWidth = STRUCTURE_WIDTH * coupleLineScale(directLine, bar, layout.collateralScale);
     layers.push(
-      `<path d="M ${bar.leftX} ${bar.leftCenterY} L ${bar.leftX} ${bar.barY} L ${bar.rightX} ${bar.barY} L ${bar.rightX} ${bar.rightCenterY}" fill="none" stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"${dashed}/>`,
+      `<path d="M ${bar.leftX} ${bar.leftCenterY} L ${bar.leftX} ${barY} L ${bar.rightX} ${barY} L ${bar.rightX} ${bar.rightCenterY}" fill="none" stroke="${STRUCTURE_COLOR}" stroke-width="${strokeWidth}"${dashed}/>`,
     );
     const midX = (bar.leftX + bar.rightX) / 2;
-    layers.push(coupleMarks(String(bar.kind), midX, bar.barY));
+    layers.push(coupleMarks(String(bar.kind), midX, barY));
     if (bar.year) {
       layers.push(
-        `<text x="${midX}" y="${bar.barY - 5}" text-anchor="middle" font-size="11" fill="${YEAR_COLOR}">${coupleYearCaption(String(bar.kind), bar.year)}</text>`,
+        `<text x="${midX}" y="${barY - 5}" text-anchor="middle" font-size="11" fill="${YEAR_COLOR}">${coupleYearCaption(String(bar.kind), bar.year)}</text>`,
       );
     }
   }
 
   for (const drop of layout.childDrops) {
-    layers.push(paintChildPieces(drop, layout.emotional));
-  }
-
-  for (const link of layout.emotional) {
-    layers.push(drawEmotion(link));
+    const sourceBar = layout.coupleBars.find(
+      (bar) =>
+        Math.abs(bar.barY - drop.fromY) < 0.01 &&
+        drop.x + 0.01 >= Math.min(bar.leftX, bar.rightX) &&
+        drop.x - 0.01 <= Math.max(bar.leftX, bar.rightX),
+    );
+    let painted = drop;
+    if (sourceBar) {
+      painted = { ...drop, fromY: drawnCoupleBarY(directLine, sourceBar, layout.collateralScale) };
+    } else if (drop.fromX != null && drop.elbowY != null) {
+      const parent = layout.nodes.find(
+        (node) => Math.abs(node.x - drop.fromX!) < 0.01 && Math.abs(node.y + NODE_HALF - drop.fromY) < 0.01,
+      );
+      if (parent) {
+        const scale = personScale(directLine, parent.id, layout.collateralScale);
+        const fromY = parent.y + NODE_HALF * scale;
+        painted = { ...drop, fromY, elbowY: fromY + (drop.elbowY - drop.fromY) * scale };
+      }
+    }
+    const child = layout.nodes.find(
+      (node) => Math.abs(node.x - drop.x) < 0.01 && Math.abs(node.y - drop.toY) < 0.01,
+    );
+    const strokeWidth = STRUCTURE_WIDTH * (child ? personScale(directLine, child.id, layout.collateralScale) : 1);
+    layers.push(paintChildDrop(painted, strokeWidth));
   }
 
   for (const node of layout.nodes) {
-    const shapeTop = node.y - NODE_HALF;
-    const shapeBottom = node.y + NODE_HALF;
+    const scale = personScale(directLine, node.id, layout.collateralScale);
+    const shapeTop = node.y - NODE_HALF * scale;
+    const shapeBottom = node.y + NODE_HALF * scale;
+    const glyph = scaledPersonShape(node, scale) + ageCaption(node);
     const labels: string[] = [];
     if (node.data.birthYear != null && Number.isFinite(node.data.birthYear)) {
       labels.push(
         labeledText(
           node.x,
-          node.y - NODE_HALF - YEAR_GAP_ABOVE,
+          shapeTop - YEAR_GAP_ABOVE,
           String(node.data.birthYear),
           YEAR_COLOR,
           shapeTop,
@@ -426,7 +496,7 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
       labels.push(
         labeledText(
           node.x,
-          node.y + NODE_HALF + NOTE_GAP_BELOW + index * LABEL_LINE_HEIGHT,
+          shapeBottom + NOTE_GAP_BELOW + index * LABEL_LINE_HEIGHT,
           note,
           fill,
           shapeTop,
@@ -435,7 +505,7 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
       );
     });
     layers.push(
-      `<g data-person-id="${node.id}" style="cursor:pointer">${personShape(node)}${labels.join("")}</g>`,
+      `<g data-person-id="${node.id}" style="cursor:pointer">${glyph}${labels.join("")}</g>`,
     );
   }
 

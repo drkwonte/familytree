@@ -1,12 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { personCode, personHasParent } from "@/lib/genogram/relations";
-import type { FamilyNode, Gender, RelativeRelation, VitalStatus } from "@/lib/genogram/types";
+import type {
+  FamilyGraph,
+  FamilyNode,
+  Gender,
+  RelativeRelation,
+  VitalStatus,
+} from "@/lib/genogram/types";
 import { validateNewPerson } from "@/lib/genogram/validate";
 import { useFamilyStore } from "@/store/family-store";
 
@@ -21,6 +27,8 @@ const RELATION_OPTIONS: { value: RelativeRelation; label: string }[] = [
   { value: "adopted-child", label: "입양 자녀" },
   { value: "foster-child", label: "위탁 자녀" },
 ];
+
+const NEW_PERSON_FORM_KEY = "new-person";
 
 const selectClassName =
   "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
@@ -84,7 +92,18 @@ function personPatch(fields: FormFields, name: string) {
   };
 }
 
+function existingAnchorId(graph: FamilyGraph, preferredId: string): string {
+  const preferredExists = graph.nodes.some((node) => node.id === preferredId);
+  return preferredExists ? preferredId : (graph.nodes[0]?.id ?? "");
+}
+
+/** Remounts the form whenever the selection changes so its fields start from the selected person. */
 export function PersonForm() {
+  const selectedPersonId = useFamilyStore((state) => state.selectedPersonId);
+  return <PersonFormFields key={selectedPersonId ?? NEW_PERSON_FORM_KEY} />;
+}
+
+function PersonFormFields() {
   const graph = useFamilyStore((state) => state.graph);
   const selectedPersonId = useFamilyStore((state) => state.selectedPersonId);
   const selectPerson = useFamilyStore((state) => state.selectPerson);
@@ -92,25 +111,12 @@ export function PersonForm() {
   const updatePerson = useFamilyStore((state) => state.updatePerson);
   const deletePerson = useFamilyStore((state) => state.deletePerson);
   const editingPerson = graph.nodes.find((node) => node.id === selectedPersonId) ?? null;
-  const [fields, setFields] = useState<FormFields>(EMPTY_FIELDS);
-  const [anchorId, setAnchorId] = useState(graph.nodes[0]?.id ?? "");
+  const [fields, setFields] = useState<FormFields>(() =>
+    editingPerson ? fieldsFromPerson(editingPerson) : EMPTY_FIELDS,
+  );
+  const [preferredAnchorId, setAnchorId] = useState("");
   const [relation, setRelation] = useState<RelativeRelation | "">("");
-
-  useEffect(() => {
-    if (!editingPerson) {
-      setFields(EMPTY_FIELDS);
-      setRelation("");
-      return;
-    }
-    setFields(fieldsFromPerson(editingPerson));
-  }, [editingPerson?.id]);
-
-  useEffect(() => {
-    const anchorStillExists = graph.nodes.some((node) => node.id === anchorId);
-    if (!anchorStillExists) {
-      setAnchorId(graph.nodes[0]?.id ?? "");
-    }
-  }, [anchorId, graph.nodes]);
+  const anchorId = existingAnchorId(graph, preferredAnchorId);
 
   function patchField<Key extends keyof FormFields>(key: Key, value: FormFields[Key]) {
     setFields((current) => ({ ...current, [key]: value }));

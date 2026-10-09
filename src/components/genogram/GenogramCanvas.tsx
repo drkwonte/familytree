@@ -16,18 +16,13 @@ type GenogramCanvasProps = {
 };
 
 export function GenogramCanvas({ graph, viewMode, onSelectPerson }: GenogramCanvasProps) {
-  const [isClient, setIsClient] = useState(false);
   const [zoom, setZoom] = useState(CANVAS_ZOOM_DEFAULT);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    setIsClient(true);
-  }, []);
-
   const svg = useMemo(() => {
-    if (!isClient || graph.nodes.length === 0) return null;
+    if (graph.nodes.length === 0) return null;
     return renderFamilyGraphSvg(graph, viewMode);
-  }, [graph, isClient, viewMode]);
+  }, [graph, viewMode]);
 
   const size = useMemo(() => {
     if (!svg) return null;
@@ -61,10 +56,6 @@ export function GenogramCanvas({ graph, viewMode, onSelectPerson }: GenogramCanv
         scroller.clientHeight - insetY,
       ),
     );
-  }
-
-  if (!isClient) {
-    return <div className="h-full w-full" />;
   }
 
   if (!svg || !size) {

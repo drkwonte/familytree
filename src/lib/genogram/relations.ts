@@ -415,6 +415,7 @@ export function deletePerson(graph: FamilyGraph, personId: string): FamilyGraph 
       : node,
   );
   return {
+    ...graph,
     nodes,
     edges: graph.edges.filter(
       (edge) => edge.source !== personId && edge.target !== personId,

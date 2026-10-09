@@ -1,5 +1,5 @@
 import { isCoupleKind } from "./relations";
-import type { FamilyEdge, FamilyGraph, FamilyNode } from "./types";
+import { type FamilyEdge, type FamilyGraph, type FamilyNode, isDirectionalEmotion } from "./types";
 
 const COUPLE_OPERATORS: Record<string, string> = {
   marriage: "--",
@@ -11,16 +11,16 @@ const COUPLE_OPERATORS: Record<string, string> = {
   affair: "~",
 };
 
-const EMOTIONAL_TYPES: Record<string, { type: string; directional: boolean }> = {
-  close: { type: "close", directional: false },
-  distant: { type: "distant", directional: false },
-  fused: { type: "fused", directional: false },
-  conflict: { type: "conflict", directional: false },
-  cutoff: { type: "cutoff", directional: false },
-  fusedConflict: { type: "fused-hostile", directional: false },
-  focused: { type: "focused", directional: true },
-  physicalAbuse: { type: "physical-abuse", directional: true },
-  sexualAbuse: { type: "sexual-abuse", directional: true },
+const EMOTIONAL_TYPES: Record<string, string> = {
+  close: "close",
+  distant: "distant",
+  fused: "fused",
+  conflict: "conflict",
+  cutoff: "cutoff",
+  fusedConflict: "fused-hostile",
+  focused: "focused",
+  physicalAbuse: "physical-abuse",
+  sexualAbuse: "sexual-abuse",
 };
 
 export function toSchematexId(id: string): string {
@@ -238,9 +238,9 @@ export function familyGraphToDsl(graph: FamilyGraph): string {
   }
 
   for (const edge of graph.edges.filter((item) => item.category === "emotional")) {
-    const mapping = EMOTIONAL_TYPES[edge.kind];
-    if (!mapping) continue;
-    const connector = mapping.directional ? `-${mapping.type}->` : `-${mapping.type}-`;
+    const type = EMOTIONAL_TYPES[edge.kind];
+    if (!type) continue;
+    const connector = isDirectionalEmotion(edge.kind) ? `-${type}->` : `-${type}-`;
     const label = edge.label ? ` ${quote(edge.label)}` : "";
     lines.push(
       `  ${toSchematexId(edge.source)} ${connector} ${toSchematexId(edge.target)}${label}`,
