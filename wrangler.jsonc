@@ -3,8 +3,10 @@
   "compatibility_date": "2026-09-27",
   "pages_build_output_dir": "out",
   // Visitors from Korea are often served from Cloudflare's Hong Kong edge, where Gemini refuses requests,
-  // so the chat Function runs next to a US Google Cloud region instead of the visitor's nearest edge.
+  // so the chat Function is placed in western North America instead of the visitor's nearest edge.
+  // The Pages builder runs Wrangler 3, which accepts only mode + hint (not the newer `region` field).
   "placement": {
-    "region": "gcp:us-central1",
+    "mode": "smart",
+    "hint": "wnam",
   },
 }

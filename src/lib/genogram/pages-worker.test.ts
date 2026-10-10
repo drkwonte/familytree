@@ -6,13 +6,16 @@ import { buildPagesFunctionSource } from "./pages-worker";
 
 const WRANGLER_CONFIG_PATH = path.join(process.cwd(), "wrangler.jsonc");
 
-function readWranglerConfig(): { placement?: { region?: string } } {
+/** Cloudflare's code for western North America, where Gemini serves requests. */
+const GEMINI_SUPPORTED_PLACEMENT_HINT = "wnam";
+
+function readWranglerConfig(): { placement?: { mode?: string; hint?: string } } {
   const withoutComments = readFileSync(WRANGLER_CONFIG_PATH, "utf8").replace(/^\s*\/\/.*$/gm, "");
   return JSON.parse(withoutComments.replace(/,(\s*[}\]])/g, "$1"));
 }
 
-test("Pages Function is pinned near a Gemini-supported cloud region, not the visitor's nearest edge", () => {
-  assert.match(readWranglerConfig().placement?.region ?? "", /^gcp:us-/);
+test("Pages Function is placed in a Gemini-supported region, in a form the Pages builder's Wrangler accepts", () => {
+  assert.deepEqual(readWranglerConfig().placement, { mode: "smart", hint: GEMINI_SUPPORTED_PLACEMENT_HINT });
 });
 
 test("Pages Function uses the runtime key, then the baked build key", () => {
