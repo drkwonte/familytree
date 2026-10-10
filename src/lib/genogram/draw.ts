@@ -20,11 +20,10 @@ import {
   EMOTION_STROKE_OPACITY,
   FILL_COLOR,
   HOUSEHOLD_DASH,
-  INDEX_INSET,
+  INDEX_RING_GAP,
   LABEL_LINE_HEIGHT,
   NOTE_GAP_BELOW,
   NODE_HALF,
-  NODE_SIZE,
   NOTE_COLOR,
   PERSON_CODE_COLOR,
   SHAPE_OUTLINE_CLEARANCE,
@@ -34,6 +33,7 @@ import {
   YEAR_COLOR,
   YEAR_GAP_ABOVE,
 } from "./constants";
+import { glyphReach, hasIndexRing } from "./glyph";
 import { directLineIds, layoutFamily, type ChildDrop, type CoupleBar, type EmotionalLink } from "./layout";
 import { personCode } from "./relations";
 import { type FamilyGraph, isDirectionalEmotion, type PersonData, type ViewMode } from "./types";
@@ -135,11 +135,12 @@ type ArrowTarget = { data: PersonData; scale: number };
 function glyphOutlineDistance(data: PersonData, direction: Point): number {
   const across = Math.abs(direction.x);
   const down = Math.abs(direction.y);
+  const reach = glyphReach(data);
   const isBoxed = data.vitalStatus === "pregnancy" || (data.vitalStatus !== "miscarriage" && data.gender === "M");
-  if (isBoxed) return NODE_HALF / Math.max(across, down);
+  if (isBoxed) return reach / Math.max(across, down);
   const isDiamond = data.vitalStatus !== "miscarriage" && data.gender === "U";
-  if (isDiamond) return NODE_HALF / (across + down);
-  return NODE_HALF;
+  if (isDiamond) return reach / (across + down);
+  return reach;
 }
 
 /** The line stops short of the receiving person so the arrowhead sits whole outside that glyph. */
@@ -219,32 +220,31 @@ function deathMark(x1: number, y1: number, x2: number, y2: number, x3: number, y
   return `<path d="M ${x1} ${y1} L ${x2} ${y2} M ${x3} ${y3} L ${x4} ${y4}" stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}" fill="none"/>`;
 }
 
-function maleSquare(x: number, y: number, isIndex: boolean): string {
-  const parts = [
-    `<rect x="${x - NODE_HALF}" y="${y - NODE_HALF}" width="${NODE_SIZE}" height="${NODE_SIZE}" fill="${FILL_COLOR}" stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"/>`,
-  ];
-  if (isIndex) {
-    parts.push(
-      `<rect x="${x - NODE_HALF + INDEX_INSET}" y="${y - NODE_HALF + INDEX_INSET}" width="${NODE_SIZE - INDEX_INSET * 2}" height="${NODE_SIZE - INDEX_INSET * 2}" fill="none" stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"/>`,
-    );
-  }
-  return parts.join("");
+const OUTLINE_PAINT = `fill="${FILL_COLOR}" stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"`;
+
+function square(x: number, y: number, half: number): string {
+  return `<rect x="${x - half}" y="${y - half}" width="${half * 2}" height="${half * 2}" ${OUTLINE_PAINT}/>`;
 }
 
-function femaleCircle(x: number, y: number, isIndex: boolean): string {
-  const parts = [
-    `<circle cx="${x}" cy="${y}" r="${NODE_HALF}" fill="${FILL_COLOR}" stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"/>`,
-  ];
-  if (isIndex) {
-    parts.push(
-      `<circle cx="${x}" cy="${y}" r="${NODE_HALF - INDEX_INSET}" fill="none" stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"/>`,
-    );
-  }
-  return parts.join("");
+function circle(x: number, y: number, radius: number): string {
+  return `<circle cx="${x}" cy="${y}" r="${radius}" ${OUTLINE_PAINT}/>`;
+}
+
+/** The outer ring is filled and painted first, so lines meeting the client stop at the ring. */
+function withIndexRing(outline: (half: number) => string, hasRing: boolean): string {
+  return (hasRing ? outline(NODE_HALF + INDEX_RING_GAP) : "") + outline(NODE_HALF);
+}
+
+function maleSquare(x: number, y: number, hasRing: boolean): string {
+  return withIndexRing((half) => square(x, y, half), hasRing);
+}
+
+function femaleCircle(x: number, y: number, hasRing: boolean): string {
+  return withIndexRing((radius) => circle(x, y, radius), hasRing);
 }
 
 function unknownDiamond(x: number, y: number): string {
-  return `<polygon points="${x},${y - NODE_HALF} ${x + NODE_HALF},${y} ${x},${y + NODE_HALF} ${x - NODE_HALF},${y}" fill="${FILL_COLOR}" stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}"/>`;
+  return `<polygon points="${x},${y - NODE_HALF} ${x + NODE_HALF},${y} ${x},${y + NODE_HALF} ${x - NODE_HALF},${y}" ${OUTLINE_PAINT}/>`;
 }
 
 function deceasedMaleMark(x: number, y: number): string {
@@ -279,9 +279,9 @@ function personShape(node: PlacedPerson): string {
       `<path d="M ${x - 8} ${y - 8} L ${x + 8} ${y + 8} M ${x + 8} ${y - 8} L ${x - 8} ${y + 8}" stroke="${STRUCTURE_COLOR}" stroke-width="${STRUCTURE_WIDTH}" fill="none"/>`,
     );
   } else if (data.gender === "F") {
-    parts.push(femaleCircle(x, y, data.isIndexPerson));
+    parts.push(femaleCircle(x, y, hasIndexRing(data)));
   } else if (data.gender === "M") {
-    parts.push(maleSquare(x, y, data.isIndexPerson));
+    parts.push(maleSquare(x, y, hasIndexRing(data)));
   } else {
     parts.push(unknownDiamond(x, y));
   }
@@ -471,8 +471,8 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
 
   for (const node of layout.nodes) {
     const scale = personScale(directLine, node.id, layout.collateralScale);
-    const shapeTop = node.y - NODE_HALF * scale;
-    const shapeBottom = node.y + NODE_HALF * scale;
+    const shapeTop = node.y - glyphReach(node.data) * scale;
+    const shapeBottom = node.y + glyphReach(node.data) * scale;
     const glyph = scaledPersonShape(node, scale) + ageCaption(node);
     const labels: string[] = [];
     if (node.data.birthYear != null && Number.isFinite(node.data.birthYear)) {

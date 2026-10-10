@@ -10,7 +10,8 @@ export const COLLATERAL_SCALE: CollateralScale = 0.8;
 export const COLLATERAL_SCALE_MIN: number = COLLATERAL_SCALE_OPTIONS[0];
 export const COLLATERAL_SCALE_STEPS = 5;
 export const NODE_HALF = NODE_SIZE / 2;
-export const INDEX_INSET = 5;
+/** Gap from the client's shape out to the second outline drawn around it. */
+export const INDEX_RING_GAP = 5;
 export const DROP_LENGTH = 18;
 export const GENERATION_GAP = 168;
 /** Length of a full generation line from the couple bar to the child glyph. */

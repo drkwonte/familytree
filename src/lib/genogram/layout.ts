@@ -26,6 +26,7 @@ import {
   YEAR_GAP_ABOVE,
   YEAR_LABEL_BOX_HEIGHT,
 } from "./constants";
+import { glyphReach } from "./glyph";
 import { isCoupleKind } from "./relations";
 import type { FamilyEdge, FamilyGraph, FamilyNode, Gender } from "./types";
 
@@ -373,8 +374,8 @@ type LayoutMetrics = {
   direct: Set<string>;
 };
 
-function glyphHalf(metrics: LayoutMetrics, personId: string): number {
-  return metrics.direct.has(personId) ? NODE_HALF : NODE_HALF * metrics.scale;
+function glyphHalf(metrics: LayoutMetrics, person: Pick<FamilyNode, "id" | "data">): number {
+  return glyphReach(person.data) * (metrics.direct.has(person.id) ? 1 : metrics.scale);
 }
 
 function slotWidth(metrics: LayoutMetrics, personId: string): number {
@@ -1129,15 +1130,15 @@ function staysBesideDirectBirthRow(
 
 function glyphsOverlap(layout: FamilyLayout, graph: FamilyGraph, scale: number): boolean {
   const direct = directLineIds(graph);
-  const half = (personId: string) => glyphHalf({ scale, direct }, personId);
+  const half = (person: Pick<FamilyNode, "id" | "data">) => glyphHalf({ scale, direct }, person);
   const nodes = layout.nodes;
   for (let left = 0; left < nodes.length; left += 1) {
     for (let right = left + 1; right < nodes.length; right += 1) {
       const a = nodes[left];
       const b = nodes[right];
       const touches =
-        Math.abs(a.x - b.x) < half(a.id) + half(b.id) &&
-        Math.abs(a.y - b.y) < half(a.id) + half(b.id);
+        Math.abs(a.x - b.x) < half(a) + half(b) &&
+        Math.abs(a.y - b.y) < half(a) + half(b);
       if (touches) return true;
       const hangingOntoDirect =
         (!direct.has(a.id) &&
@@ -1151,8 +1152,8 @@ function glyphsOverlap(layout: FamilyLayout, graph: FamilyGraph, scale: number):
       if (!hangingOntoDirect) continue;
       // Only a descendant dropping through a direct person's column is covering.
       // Someone beside an ancestor keeps the preferred scale.
-      const horizontalGap = Math.abs(a.x - b.x) - half(a.id) - half(b.id);
-      const verticalGap = Math.abs(a.y - b.y) - half(a.id) - half(b.id);
+      const horizontalGap = Math.abs(a.x - b.x) - half(a) - half(b);
+      const verticalGap = Math.abs(a.y - b.y) - half(a) - half(b);
       if (horizontalGap < 0 && verticalGap < COLLATERAL_DIRECT_AIR) return true;
     }
   }
@@ -1212,7 +1213,7 @@ function householdBoxesFor(graph: FamilyGraph, laid: LaidNode[], metrics: Layout
       .map((id) => laid.find((node) => node.id === id))
       .filter((node): node is LaidNode => Boolean(node));
     if (members.length === 0) return [];
-    const extents = members.map((member) => personLabelExtent(member, glyphHalf(metrics, member.id)));
+    const extents = members.map((member) => personLabelExtent(member, glyphHalf(metrics, member)));
     const left = Math.min(...extents.map((extent) => extent.left)) - HOUSEHOLD_PAD_X;
     const right = Math.max(...extents.map((extent) => extent.right)) + HOUSEHOLD_PAD_X;
     const top = Math.min(...extents.map((extent) => extent.top)) - HOUSEHOLD_PAD_Y;

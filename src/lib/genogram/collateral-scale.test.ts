@@ -10,6 +10,7 @@ import {
   NODE_SIZE,
 } from "./constants";
 import { renderFamilyGraphSvg } from "./draw";
+import { glyphReach } from "./glyph";
 import { layoutFamily } from "./layout";
 import { addRelative, deletePerson } from "./relations";
 import { COLLATERAL_SCALE_OPTIONS, EMPTY_GRAPH, type FamilyGraph } from "./types";
@@ -118,7 +119,7 @@ test("labels under a shrunken glyph stay as close to it as under a full-size one
     return Number(backdrop[1]) - center;
   };
   const auntGap = labelTop(auntId, aunt.y) - NODE_HALF * layout.collateralScale;
-  const clientGap = labelTop(client.id, client.y) - NODE_HALF;
+  const clientGap = labelTop(client.id, client.y) - glyphReach(client.data);
   assert.ok(Math.abs(auntGap - clientGap) < COORDINATE_TOLERANCE, `aunt label gap ${auntGap}, client ${clientGap}`);
 });
 

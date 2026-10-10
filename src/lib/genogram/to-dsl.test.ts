@@ -13,6 +13,7 @@ import {
   NODE_HALF,
 } from "./constants";
 import { renderFamilyGraphSvg } from "./draw";
+import { glyphReach } from "./glyph";
 import { layoutFamily } from "./layout";
 import { addRelative, personCode, seedDemoGraph, updatePerson } from "./relations";
 import { EMPTY_GRAPH } from "./types";
@@ -466,13 +467,14 @@ test("an over-involvement arrow shows its head just outside the person it points
   assert.equal(heads.length, 1);
   const outsideSquare = (point: { x: number; y: number }) =>
     Math.max(Math.abs(point.x - target.x), Math.abs(point.y - target.y));
+  const outline = glyphReach(target.data);
   for (const corner of heads[0]) {
-    assert.ok(outsideSquare(corner) > NODE_HALF, `arrowhead corner ${corner.x},${corner.y} is inside the glyph`);
+    assert.ok(outsideSquare(corner) > outline, `arrowhead corner ${corner.x},${corner.y} is inside the glyph`);
   }
   const tip = heads[0].reduce((nearest, corner) =>
     outsideSquare(corner) < outsideSquare(nearest) ? corner : nearest,
   );
-  assert.ok(outsideSquare(tip) <= NODE_HALF + EMOTION_ARROW_CLEARANCE + 0.01);
+  assert.ok(outsideSquare(tip) <= outline + EMOTION_ARROW_CLEARANCE + 0.01);
 });
 
 test("only directional relationships draw an arrowhead", () => {
