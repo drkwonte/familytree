@@ -1,6 +1,7 @@
 import {
   CHAT_ERRORS,
   GEMINI_MODEL,
+  GEMINI_REGION_BLOCKED_STATUS,
   GEMINI_RETRY_DELAY_MS,
   GEMINI_RETRY_STATUSES,
   GEMINI_TIMEOUT_MS,
@@ -22,6 +23,7 @@ const CHAT_ERRORS = ${JSON.stringify(CHAT_ERRORS)};
 const GEMINI_TIMEOUT_MS = ${GEMINI_TIMEOUT_MS};
 const GEMINI_RETRY_DELAY_MS = ${GEMINI_RETRY_DELAY_MS};
 const GEMINI_RETRY_STATUSES = ${JSON.stringify(GEMINI_RETRY_STATUSES)};
+const GEMINI_REGION_BLOCKED_STATUS = ${JSON.stringify(GEMINI_REGION_BLOCKED_STATUS)};
 const NO_STORE = { "Cache-Control": "no-store", "x-familytree-api": "1" };
 
 function readApiKey(env) {
@@ -64,6 +66,11 @@ function requestGemini(prompt, apiKey) {
   );
 }
 
+async function rejectionMessage(response) {
+  const payload = await response.json().catch(() => null);
+  return payload?.error?.status === GEMINI_REGION_BLOCKED_STATUS ? CHAT_ERRORS.modelRegionBlocked : CHAT_ERRORS.modelFailed;
+}
+
 async function askGemini(prompt, apiKey) {
   try {
     let response = await requestGemini(prompt, apiKey);
@@ -72,7 +79,7 @@ async function askGemini(prompt, apiKey) {
       response = await requestGemini(prompt, apiKey);
     }
     if (GEMINI_RETRY_STATUSES.includes(response.status)) return { error: CHAT_ERRORS.modelBusy, status: 503 };
-    if (!response.ok) return { error: CHAT_ERRORS.modelFailed, status: 502 };
+    if (!response.ok) return { error: await rejectionMessage(response), status: 502 };
     const text = readModelText(await response.json());
     return text ? { text } : { error: CHAT_ERRORS.emptyModelResponse, status: 502 };
   } catch (cause) {

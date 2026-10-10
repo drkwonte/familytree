@@ -118,6 +118,28 @@ for (const [name, handlerFor] of [
     assert.equal(response.status, 502);
     assert.equal(await errorOf(response), CHAT_ERRORS.emptyModelResponse);
   });
+
+  test(`${name}: a model that refuses the server's region says so instead of a generic failure`, async () => {
+    const handler = await handlerFor();
+    const gemini = stubGemini(
+      Response.json(
+        { error: { code: 400, message: "User location is not supported for the API use.", status: "FAILED_PRECONDITION" } },
+        { status: 400 },
+      ),
+    );
+    const response = await handler(validBody, TEST_KEY);
+    assert.equal(response.status, 502);
+    assert.equal(await errorOf(response), CHAT_ERRORS.modelRegionBlocked);
+    assert.equal(gemini.calls(), 1);
+  });
+
+  test(`${name}: other model rejections stay a generic failure`, async () => {
+    const handler = await handlerFor();
+    stubGemini(Response.json({ error: { code: 400, status: "INVALID_ARGUMENT" } }, { status: 400 }));
+    const response = await handler(validBody, TEST_KEY);
+    assert.equal(response.status, 502);
+    assert.equal(await errorOf(response), CHAT_ERRORS.modelFailed);
+  });
 }
 
 test("Gemini key helper keeps the first non-empty candidate", () => {

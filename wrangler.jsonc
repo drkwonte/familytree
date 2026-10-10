@@ -2,4 +2,9 @@
   "name": "familytree",
   "compatibility_date": "2026-09-27",
   "pages_build_output_dir": "out",
+  // Visitors from Korea are often served from Cloudflare's Hong Kong edge, where Gemini refuses requests,
+  // so the chat Function runs next to a US Google Cloud region instead of the visitor's nearest edge.
+  "placement": {
+    "region": "gcp:us-central1",
+  },
 }
