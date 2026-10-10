@@ -1,5 +1,4 @@
 import { GEMINI_SYSTEM_PROMPT } from "./gemini-prompt";
-import type { FamilyGraph } from "./types";
 
 export const GEMINI_MODEL = "gemini-3.8-flash";
 const GEMINI_GENERATE_CONTENT_URL =
@@ -7,6 +6,24 @@ const GEMINI_GENERATE_CONTENT_URL =
 
 export const MISSING_API_KEY_MESSAGE =
   "GEMINI_API_KEY가 없습니다. 로컬은 .env.local, Cloudflare는 프로젝트 환경 변수에 넣어 주세요.";
+
+export const GEMINI_API_KEY_NAME = ["GEMINI", "API", "KEY"].join("_");
+
+/** Stops waiting well before the browser or Cloudflare gives up, so the counselor gets a readable error. */
+export const GEMINI_TIMEOUT_MS = 45_000;
+export const GEMINI_RETRY_DELAY_MS = 1_000;
+/** Overload and rate-limit answers usually clear within a second, so one retry hides most of them. */
+export const GEMINI_RETRY_STATUSES: readonly number[] = [429, 500, 503];
+
+export const CHAT_ERRORS = {
+  invalidRequest: "요청 형식이 올바르지 않습니다. 페이지를 새로고침한 뒤 다시 보내 주세요.",
+  emptyMessage: "메시지를 입력해 주세요.",
+  modelBusy: "AI 사용량이 몰려 응답하지 못했습니다. 잠시 후 다시 보내 주세요.",
+  modelTimeout: "AI 응답이 너무 늦어 중단했습니다. 다시 보내 주세요.",
+  modelFailed: "AI 요청에 실패했습니다. 잠시 후 다시 보내 주세요.",
+  emptyModelResponse: "AI 응답이 비어 있습니다. 다시 보내 주세요.",
+  unexpected: "요청을 처리하다 오류가 났습니다. 다시 보내 주세요.",
+} as const;
 
 export function readGeminiApiKey(...candidates: unknown[]): string | undefined {
   for (const candidate of candidates) {
@@ -16,48 +33,38 @@ export function readGeminiApiKey(...candidates: unknown[]): string | undefined {
   }
   return undefined;
 }
-const EMPTY_MESSAGE_ERROR = "메시지를 입력해 주세요.";
-const EMPTY_MODEL_RESPONSE_ERROR = "모델 응답이 비었습니다.";
-const INVALID_GRAPH_ERROR = "그래프 형식이 올바르지 않습니다.";
-const JSON_PARSE_ERROR = "JSON 파싱에 실패했습니다.";
 
-type ChatRequest = {
-  message: string;
-  graph: FamilyGraph;
-};
-
-type ChatModelPayload = {
-  assistantMessage?: string;
-  graph?: FamilyGraph;
-};
-
-export function jsonError(message: string, status: number): Response {
-  return Response.json({ error: message }, { status });
+export function parseEnvFileValue(source: string, name: string): string | undefined {
+  for (const rawLine of source.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const separatorIndex = line.indexOf("=");
+    if (separatorIndex === -1) continue;
+    if (line.slice(0, separatorIndex).trim() !== name) continue;
+    return line.slice(separatorIndex + 1).trim().replace(/^["']|["']$/g, "");
+  }
+  return undefined;
 }
 
-export function parseChatModelPayload(text: string):
-  | { ok: true; assistantMessage: string; graph: FamilyGraph }
-  | { ok: false; error: string; status: number } {
+type ChatRequest = { message: string; graph: unknown };
+
+export function jsonError(message: string, status: number): Response {
+  return Response.json({ error: message }, { status, headers: { "Cache-Control": "no-store" } });
+}
+
+async function readChatRequest(request: Request): Promise<ChatRequest | null> {
   try {
-    const parsed = JSON.parse(text) as ChatModelPayload;
-    if (!parsed.graph?.nodes || !parsed.graph.edges) {
-      return { ok: false, error: INVALID_GRAPH_ERROR, status: 502 };
+    const body = (await request.json()) as Partial<ChatRequest> | null;
+    if (!body || typeof body.message !== "string" || typeof body.graph !== "object" || body.graph === null) {
+      return null;
     }
-    return {
-      ok: true,
-      assistantMessage: parsed.assistantMessage ?? "가계도를 업데이트했습니다.",
-      graph: {
-        nodes: parsed.graph.nodes,
-        edges: parsed.graph.edges,
-        households: parsed.graph.households ?? [],
-      },
-    };
+    return { message: body.message, graph: body.graph };
   } catch {
-    return { ok: false, error: JSON_PARSE_ERROR, status: 502 };
+    return null;
   }
 }
 
-export function buildChatPrompt(graph: FamilyGraph, message: string): string {
+export function buildChatPrompt(graph: unknown, message: string): string {
   return `${GEMINI_SYSTEM_PROMPT}\n\n현재 가계도 JSON:\n${JSON.stringify(graph)}\n\n사용자 요청:\n${message}`;
 }
 
@@ -69,51 +76,60 @@ function readModelText(payload: unknown): string | null {
   return text?.trim() ? text : null;
 }
 
+type GeminiResult = { text: string } | { error: string; status: number };
+
+async function requestGemini(prompt: string, apiKey: string, fetchImpl: typeof fetch): Promise<Response> {
+  return fetchImpl(`${GEMINI_GENERATE_CONTENT_URL}?key=${encodeURIComponent(apiKey)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
+    body: JSON.stringify({
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" },
+    }),
+  });
+}
+
+async function askGemini(prompt: string, apiKey: string, fetchImpl: typeof fetch): Promise<GeminiResult> {
+  try {
+    let response = await requestGemini(prompt, apiKey, fetchImpl);
+    if (GEMINI_RETRY_STATUSES.includes(response.status)) {
+      await new Promise((resolve) => setTimeout(resolve, GEMINI_RETRY_DELAY_MS));
+      response = await requestGemini(prompt, apiKey, fetchImpl);
+    }
+    if (GEMINI_RETRY_STATUSES.includes(response.status)) return { error: CHAT_ERRORS.modelBusy, status: 503 };
+    if (!response.ok) return { error: CHAT_ERRORS.modelFailed, status: 502 };
+    const text = readModelText(await response.json());
+    return text ? { text } : { error: CHAT_ERRORS.emptyModelResponse, status: 502 };
+  } catch (cause) {
+    const timedOut = cause instanceof Error && cause.name === "TimeoutError";
+    return timedOut ? { error: CHAT_ERRORS.modelTimeout, status: 504 } : { error: CHAT_ERRORS.modelFailed, status: 502 };
+  }
+}
+
+/**
+ * Relays the counselor's request to Gemini and returns its raw reply as `{ reply }`.
+ * Every failure, including a malformed request, comes back as JSON `{ error }`, never a thrown exception,
+ * so the host never substitutes its own HTML error page.
+ */
 export async function handleChatPost(
   request: Request,
   apiKey: string | undefined,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<Response> {
-  if (!apiKey) {
-    return jsonError(MISSING_API_KEY_MESSAGE, 500);
+  try {
+    return await relayChat(request, apiKey, fetchImpl);
+  } catch {
+    return jsonError(CHAT_ERRORS.unexpected, 500);
   }
+}
 
-  const body = (await request.json()) as ChatRequest;
-  if (!body.message?.trim()) {
-    return jsonError(EMPTY_MESSAGE_ERROR, 400);
-  }
-
-  const geminiResponse = await fetch(`${GEMINI_GENERATE_CONTENT_URL}?key=${encodeURIComponent(apiKey)}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      contents: [
-        {
-          role: "user",
-          parts: [{ text: buildChatPrompt(body.graph, body.message) }],
-        },
-      ],
-      generationConfig: {
-        responseMimeType: "application/json",
-      },
-    }),
-  });
-
-  if (!geminiResponse.ok) {
-    return jsonError(EMPTY_MODEL_RESPONSE_ERROR, 502);
-  }
-
-  const text = readModelText(await geminiResponse.json());
-  if (!text) {
-    return jsonError(EMPTY_MODEL_RESPONSE_ERROR, 502);
-  }
-
-  const parsed = parseChatModelPayload(text);
-  if (!parsed.ok) {
-    return jsonError(parsed.error, parsed.status);
-  }
-
-  return Response.json({
-    assistantMessage: parsed.assistantMessage,
-    graph: parsed.graph,
-  });
+async function relayChat(request: Request, apiKey: string | undefined, fetchImpl: typeof fetch): Promise<Response> {
+  if (!apiKey) return jsonError(MISSING_API_KEY_MESSAGE, 500);
+  const body = await readChatRequest(request);
+  if (!body) return jsonError(CHAT_ERRORS.invalidRequest, 400);
+  if (!body.message.trim()) return jsonError(CHAT_ERRORS.emptyMessage, 400);
+  const result = await askGemini(buildChatPrompt(body.graph, body.message), apiKey, fetchImpl);
+  if ("error" in result) return jsonError(result.error, result.status);
+  return Response.json({ reply: result.text }, { headers: { "Cache-Control": "no-store" } });
 }

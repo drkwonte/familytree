@@ -1,20 +1,28 @@
-import { GEMINI_MODEL, MISSING_API_KEY_MESSAGE } from "./chat";
+import {
+  CHAT_ERRORS,
+  GEMINI_MODEL,
+  GEMINI_RETRY_DELAY_MS,
+  GEMINI_RETRY_STATUSES,
+  GEMINI_TIMEOUT_MS,
+  MISSING_API_KEY_MESSAGE,
+} from "./chat";
 import { GEMINI_SYSTEM_PROMPT } from "./gemini-prompt";
 
-const EMPTY_MESSAGE_ERROR = "메시지를 입력해 주세요.";
-const EMPTY_MODEL_RESPONSE_ERROR = "모델 응답이 비었습니다.";
-const INVALID_GRAPH_ERROR = "그래프 형식이 올바르지 않습니다.";
-const JSON_PARSE_ERROR = "JSON 파싱에 실패했습니다.";
-
+/**
+ * Plain-JS twin of `handleChatPost` for the Cloudflare Pages Function, which cannot import
+ * the app's TypeScript. `chat.test.ts` runs both against the same cases to keep them in step.
+ * The x-familytree-api header shows a response really came from this Function, not a host error page.
+ */
 export function buildPagesFunctionSource(bakedApiKey: string): string {
   return `const BAKED_API_KEY = ${JSON.stringify(bakedApiKey)};
 const SYSTEM_PROMPT = ${JSON.stringify(GEMINI_SYSTEM_PROMPT)};
 const GEMINI_MODEL = ${JSON.stringify(GEMINI_MODEL)};
 const MISSING_API_KEY_MESSAGE = ${JSON.stringify(MISSING_API_KEY_MESSAGE)};
-const EMPTY_MESSAGE_ERROR = ${JSON.stringify(EMPTY_MESSAGE_ERROR)};
-const EMPTY_MODEL_RESPONSE_ERROR = ${JSON.stringify(EMPTY_MODEL_RESPONSE_ERROR)};
-const INVALID_GRAPH_ERROR = ${JSON.stringify(INVALID_GRAPH_ERROR)};
-const JSON_PARSE_ERROR = ${JSON.stringify(JSON_PARSE_ERROR)};
+const CHAT_ERRORS = ${JSON.stringify(CHAT_ERRORS)};
+const GEMINI_TIMEOUT_MS = ${GEMINI_TIMEOUT_MS};
+const GEMINI_RETRY_DELAY_MS = ${GEMINI_RETRY_DELAY_MS};
+const GEMINI_RETRY_STATUSES = ${JSON.stringify(GEMINI_RETRY_STATUSES)};
+const NO_STORE = { "Cache-Control": "no-store", "x-familytree-api": "1" };
 
 function readApiKey(env) {
   const runtime = typeof env?.GEMINI_API_KEY === "string" ? env.GEMINI_API_KEY.trim() : "";
@@ -23,26 +31,16 @@ function readApiKey(env) {
 }
 
 function jsonError(message, status) {
-  return Response.json({ error: message }, { status, headers: { "Cache-Control": "no-store", "x-familytree-api": "1" } });
+  return Response.json({ error: message }, { status, headers: NO_STORE });
 }
 
-function parseChatModelPayload(text) {
+async function readChatRequest(request) {
   try {
-    const parsed = JSON.parse(text);
-    if (!parsed.graph?.nodes || !parsed.graph.edges) {
-      return { ok: false, error: INVALID_GRAPH_ERROR, status: 502 };
-    }
-    return {
-      ok: true,
-      assistantMessage: parsed.assistantMessage ?? "가계도를 업데이트했습니다.",
-      graph: {
-        nodes: parsed.graph.nodes,
-        edges: parsed.graph.edges,
-        households: parsed.graph.households ?? [],
-      },
-    };
+    const body = await request.json();
+    if (!body || typeof body.message !== "string" || typeof body.graph !== "object" || body.graph === null) return null;
+    return { message: body.message, graph: body.graph };
   } catch {
-    return { ok: false, error: JSON_PARSE_ERROR, status: 502 };
+    return null;
   }
 }
 
@@ -51,36 +49,55 @@ function readModelText(payload) {
   return text?.trim() ? text : null;
 }
 
-async function handleChat(request, apiKey) {
-  if (!apiKey) return jsonError(MISSING_API_KEY_MESSAGE, 500);
-  const body = await request.json();
-  if (!body.message?.trim()) return jsonError(EMPTY_MESSAGE_ERROR, 400);
-
-  const prompt = SYSTEM_PROMPT + "\\n\\n현재 가계도 JSON:\\n" + JSON.stringify(body.graph) + "\\n\\n사용자 요청:\\n" + body.message;
-  const geminiResponse = await fetch(
+function requestGemini(prompt, apiKey) {
+  return fetch(
     "https://generativelanguage.googleapis.com/v1beta/models/" + GEMINI_MODEL + ":generateContent?key=" + encodeURIComponent(apiKey),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(GEMINI_TIMEOUT_MS),
       body: JSON.stringify({
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         generationConfig: { responseMimeType: "application/json" },
       }),
     },
   );
-  if (!geminiResponse.ok) return jsonError(EMPTY_MODEL_RESPONSE_ERROR, 502);
-  const text = readModelText(await geminiResponse.json());
-  if (!text) return jsonError(EMPTY_MODEL_RESPONSE_ERROR, 502);
-  const parsed = parseChatModelPayload(text);
-  if (!parsed.ok) return jsonError(parsed.error, parsed.status);
-  return Response.json({
-    assistantMessage: parsed.assistantMessage,
-    graph: parsed.graph,
-  }, { headers: { "Cache-Control": "no-store", "x-familytree-api": "1" } });
+}
+
+async function askGemini(prompt, apiKey) {
+  try {
+    let response = await requestGemini(prompt, apiKey);
+    if (GEMINI_RETRY_STATUSES.includes(response.status)) {
+      await new Promise((resolve) => setTimeout(resolve, GEMINI_RETRY_DELAY_MS));
+      response = await requestGemini(prompt, apiKey);
+    }
+    if (GEMINI_RETRY_STATUSES.includes(response.status)) return { error: CHAT_ERRORS.modelBusy, status: 503 };
+    if (!response.ok) return { error: CHAT_ERRORS.modelFailed, status: 502 };
+    const text = readModelText(await response.json());
+    return text ? { text } : { error: CHAT_ERRORS.emptyModelResponse, status: 502 };
+  } catch (cause) {
+    const timedOut = cause instanceof Error && cause.name === "TimeoutError";
+    return timedOut ? { error: CHAT_ERRORS.modelTimeout, status: 504 } : { error: CHAT_ERRORS.modelFailed, status: 502 };
+  }
+}
+
+async function handleChat(request, apiKey) {
+  if (!apiKey) return jsonError(MISSING_API_KEY_MESSAGE, 500);
+  const body = await readChatRequest(request);
+  if (!body) return jsonError(CHAT_ERRORS.invalidRequest, 400);
+  if (!body.message.trim()) return jsonError(CHAT_ERRORS.emptyMessage, 400);
+  const prompt = SYSTEM_PROMPT + "\\n\\n현재 가계도 JSON:\\n" + JSON.stringify(body.graph) + "\\n\\n사용자 요청:\\n" + body.message;
+  const result = await askGemini(prompt, apiKey);
+  if ("error" in result) return jsonError(result.error, result.status);
+  return Response.json({ reply: result.text }, { headers: NO_STORE });
 }
 
 export async function onRequestPost(context) {
-  return handleChat(context.request, readApiKey(context.env));
+  try {
+    return await handleChat(context.request, readApiKey(context.env));
+  } catch {
+    return jsonError(CHAT_ERRORS.unexpected, 500);
+  }
 }
 `;
 }

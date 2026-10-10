@@ -4,6 +4,8 @@ import { ArrowUp } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { applyChatChanges } from "@/lib/genogram/chat-changes";
+import { requestChatChanges } from "@/lib/genogram/chat-client";
 import { useFamilyStore } from "@/store/family-store";
 
 export function ChatPanel() {
@@ -25,32 +27,27 @@ export function ChatPanel() {
     setMessage("");
     setThinking(true);
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        cache: "no-store",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed, graph }),
-      });
-      const payload = (await response.json()) as {
-        error?: string;
-        assistantMessage?: string;
-        graph?: typeof graph;
-      };
-      if (!response.ok || !payload.graph) {
-        throw new Error(payload.error ?? "요청에 실패했습니다.");
+      const reply = await requestChatChanges(trimmed, graph);
+      if (!reply.ok) {
+        reportFailure(reply.error);
+        return;
       }
-      replaceGraph(payload.graph, payload.assistantMessage ?? "가계도를 반영했습니다.");
-    } catch (cause) {
-      const text = cause instanceof Error ? cause.message : "알 수 없는 오류";
-      setError(text);
-      appendChat({
-        id: crypto.randomUUID(),
-        role: "assistant",
-        content: `반영하지 못했습니다. ${text}`,
-      });
+      // Applied to the graph as it is now, so edits made while the model was thinking survive.
+      const applied = applyChatChanges(useFamilyStore.getState().graph, reply.changes);
+      const note = [reply.assistantMessage, ...reply.problems, ...applied.problems].join("\n");
+      if (applied.graph === useFamilyStore.getState().graph) {
+        appendChat({ id: crypto.randomUUID(), role: "assistant", content: note });
+      } else {
+        replaceGraph(applied.graph, note);
+      }
     } finally {
       setThinking(false);
     }
+  }
+
+  function reportFailure(text: string) {
+    setError(text);
+    appendChat({ id: crypto.randomUUID(), role: "assistant", content: `반영하지 못했습니다. ${text}` });
   }
 
   return (
@@ -63,7 +60,7 @@ export function ChatPanel() {
               className={
                 turn.role === "user"
                   ? "ml-8 rounded-lg bg-primary px-3 py-2 text-sm text-primary-foreground"
-                  : "mr-8 rounded-lg bg-muted px-3 py-2 text-sm"
+                  : "mr-8 whitespace-pre-line rounded-lg bg-muted px-3 py-2 text-sm"
               }
             >
               {turn.content}
