@@ -36,6 +36,11 @@ export const MARRIED_COLLATERAL_GAP = COLLATERAL_SIBLING_GAP + NODE_HALF + DROP_
 /** Air between unmarried sibling shapes. A spouse reserves another seat beside them. */
 export const SIBLING_CLEARANCE = 32;
 export const CHILD_SLOT_WIDTH = NODE_SIZE + SIBLING_CLEARANCE;
+/**
+ * Couple line left visible between a person and a later partner. As wide as the air
+ * between siblings, so the remarriage still reads as a couple and not as a sibling.
+ */
+export const LATER_PARTNER_CLEARANCE = SIBLING_CLEARANCE;
 export const CHILD_DROP_INSET = 28;
 export const MIN_COUPLE_GAP = 80;
 /**

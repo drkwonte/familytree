@@ -15,7 +15,8 @@ import {
   NODE_HALF,
   NODE_SIZE,
 } from "./constants";
-import { directLineIds, familyOfOriginIds, findSpouseId, layoutFamily } from "./layout";
+import { directLineIds, familyOfOriginIds, layoutFamily } from "./layout";
+import { findSpouseId } from "./partners";
 import { addRelative, deletePerson, isCoupleKind } from "./relations";
 import { EMPTY_GRAPH, type FamilyGraph } from "./types";
 import { SIBLING_NEEDS_PARENT_MESSAGE, validateNewPerson } from "./validate";

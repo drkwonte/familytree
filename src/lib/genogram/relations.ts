@@ -224,7 +224,7 @@ export function addRelative(
   }
   switch (params.relation) {
     case "spouse":
-      return addEdge(next, anchor, nextNode.id, "marriage");
+      return addEdge(next, anchor, nextNode.id, findSpouse(graph, anchor) ? "remarriage" : "marriage");
     case "father":
     case "mother": {
       const withParent = addEdge(next, nextNode.id, anchor, "parent");

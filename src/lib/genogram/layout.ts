@@ -19,6 +19,7 @@ import {
   DROP_LENGTH,
   GENERATION_GAP,
   LABEL_LINE_HEIGHT,
+  LATER_PARTNER_CLEARANCE,
   MIN_COUPLE_GAP,
   NODE_HALF,
   NODE_SIZE,
@@ -27,8 +28,16 @@ import {
   YEAR_LABEL_BOX_HEIGHT,
 } from "./constants";
 import { glyphReach } from "./glyph";
+import {
+  coupleOrder,
+  findSpouseId,
+  isLaterPartner,
+  isLaterPartnerEdge,
+  laterPartnerIds,
+  laterPartnerSide,
+} from "./partners";
 import { isCoupleKind } from "./relations";
-import type { FamilyEdge, FamilyGraph, FamilyNode, Gender } from "./types";
+import type { FamilyEdge, FamilyGraph, FamilyNode } from "./types";
 
 export type Point = { x: number; y: number };
 
@@ -92,22 +101,6 @@ function nodesById(graph: FamilyGraph): Map<string, FamilyNode> {
   return new Map(graph.nodes.map((node) => [node.id, node]));
 }
 
-function coupleOrder(a: FamilyNode, b: FamilyNode): [FamilyNode, FamilyNode] {
-  const rank = (gender: Gender) => (gender === "M" ? 0 : gender === "F" ? 1 : 2);
-  return rank(a.data.gender) <= rank(b.data.gender) ? [a, b] : [b, a];
-}
-
-export function findSpouseId(graph: FamilyGraph, personId: string): string | undefined {
-  const edge = graph.edges.find(
-    (item) =>
-      item.category === "structural" &&
-      isCoupleKind(item.kind) &&
-      (item.source === personId || item.target === personId),
-  );
-  if (!edge) return undefined;
-  return edge.source === personId ? edge.target : edge.source;
-}
-
 function coupleEdgeBetween(graph: FamilyGraph, a: string, b: string): FamilyEdge | undefined {
   return graph.edges.find(
     (edge) =>
@@ -128,7 +121,7 @@ function parentChildEdges(graph: FamilyGraph): FamilyEdge[] {
 function couplesOf(graph: FamilyGraph) {
   const nodes = nodesById(graph);
   return graph.edges
-    .filter((edge) => edge.category === "structural" && isCoupleKind(edge.kind))
+    .filter((edge) => edge.category === "structural" && isCoupleKind(edge.kind) && !isLaterPartnerEdge(graph, edge))
     .flatMap((edge) => {
       const source = nodes.get(edge.source);
       const target = nodes.get(edge.target);
@@ -332,6 +325,9 @@ function assignGenerations(graph: FamilyGraph): Map<string, number> {
       generations.set(spouseId, generation);
       queue.push(spouseId);
     }
+    for (const partnerId of laterPartnerIds(graph, current)) {
+      if (!generations.has(partnerId)) generations.set(partnerId, generation);
+    }
     for (const parent of parentsOf.get(current) ?? []) {
       if (!generations.has(parent)) {
         generations.set(parent, generation - 1);
@@ -429,7 +425,34 @@ function linksSeparateDirectBirthFamilies(
   );
 }
 
+/** Center to center from a person to their later partner, who is drawn at the collateral size. */
+function laterPartnerGap(metrics: LayoutMetrics, person: FamilyNode, partner: FamilyNode): number {
+  const clearance = metrics.direct.has(person.id) ? LATER_PARTNER_CLEARANCE : LATER_PARTNER_CLEARANCE * metrics.scale;
+  return glyphHalf(metrics, person) + glyphHalf(metrics, partner) + clearance;
+}
+
+function laterPartnersOf(graph: FamilyGraph, personId: string): FamilyNode[] {
+  return laterPartnerIds(graph, personId).flatMap((id) => graph.nodes.find((node) => node.id === id) ?? []);
+}
+
+/** Every later partner and the gap leading out to them, nearest first. */
+function laterPartnerSeats(graph: FamilyGraph, metrics: LayoutMetrics, person: FamilyNode) {
+  return laterPartnersOf(graph, person.id).map((partner) => ({ partner, gap: laterPartnerGap(metrics, person, partner) }));
+}
+
+/** Later partners sit inside their person's unit, so a sibling on that side moves over rather than onto them. */
+function withLaterPartnerSeats(graph: FamilyGraph, metrics: LayoutMetrics, unit: SiblingUnit): SiblingUnit {
+  const reach = laterPartnerSeats(graph, metrics, unit.child).reduce((sum, seat) => sum + seat.gap, 0);
+  if (reach === 0) return unit;
+  const outwardLeft = laterPartnerSide(graph, unit.child) < 0;
+  return { ...unit, width: unit.width + reach, childOffset: unit.childOffset + (outwardLeft ? reach : 0) };
+}
+
 function siblingUnits(graph: FamilyGraph, children: FamilyNode[], metrics: LayoutMetrics): SiblingUnit[] {
+  return unitsWithoutLaterPartners(graph, children, metrics).map((unit) => withLaterPartnerSeats(graph, metrics, unit));
+}
+
+function unitsWithoutLaterPartners(graph: FamilyGraph, children: FamilyNode[], metrics: LayoutMetrics): SiblingUnit[] {
   const siblingIds = new Set(children.map((child) => child.id));
   return children.map((child, index) => {
     const spouseId = findSpouseId(graph, child.id);
@@ -789,7 +812,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     originX += MIN_COUPLE_GAP + NODE_SIZE * 2;
   }
 
-  const unplacedNodes = () => graph.nodes.filter((node) => !positions.has(node.id));
+  const unplacedNodes = () => graph.nodes.filter((node) => !positions.has(node.id) && !isLaterPartner(graph, node.id));
   const parentKey = (node: FamilyNode) =>
     parentChildEdges(graph)
       .filter((edge) => edge.target === node.id)
@@ -971,6 +994,25 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     if (!widened) break;
   }
 
+  // Seated last, once their person has stopped moving, beside them in the room their unit reserved.
+  const laterPartnerBarIds = new Set<string>();
+  for (const person of graph.nodes) {
+    const personPoint = positions.get(person.id);
+    if (!personPoint) continue;
+    const side = laterPartnerSide(graph, person);
+    let x = personPoint.x;
+    for (const { partner, gap } of laterPartnerSeats(graph, metrics, person)) {
+      const edge = coupleEdgeBetween(graph, person.id, partner.id);
+      if (!edge) continue;
+      x += side * gap;
+      positions.set(partner.id, { x, y: personPoint.y });
+      const [left, right] = side > 0 ? [person, partner] : [partner, person];
+      const [leftX, rightX] = side > 0 ? [personPoint.x, x] : [x, personPoint.x];
+      recordBar(edge, left, right, leftX, rightX, personPoint.y);
+      laterPartnerBarIds.add(edge.id);
+    }
+  }
+
   const childDrops: ChildDrop[] = [];
   const linkedChildren = new Set<string>();
 
@@ -983,6 +1025,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     )?.kind;
 
   for (const bar of coupleBars) {
+    if (laterPartnerBarIds.has(bar.id)) continue;
     const children = childrenOfCouple(graph, bar.leftId, bar.rightId);
     for (const child of children) {
       const point = positions.get(child.id);
