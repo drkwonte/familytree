@@ -39,6 +39,16 @@ export function personCode(displayNumber: number): string {
   return `인물${displayNumber}`;
 }
 
+/** How a person reads in a picker: the number shown on the canvas, plus the occupation when there is one. */
+export function personOptionLabel(person: FamilyNode): string {
+  const code = personCode(person.data.displayNumber);
+  return person.data.occupation ? `${code} · ${person.data.occupation}` : code;
+}
+
+export function peopleByNumber(graph: FamilyGraph): FamilyNode[] {
+  return [...graph.nodes].sort((left, right) => left.data.displayNumber - right.data.displayNumber);
+}
+
 export function ensureDisplayNumbers(graph: FamilyGraph): FamilyGraph {
   let next = 1;
   const used = new Set<number>();

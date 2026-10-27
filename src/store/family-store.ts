@@ -14,12 +14,6 @@ import {
   type VitalStatus,
 } from "@/lib/genogram/types";
 
-export type ChatTurn = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-};
-
 type AddPersonInput = {
   name: string;
   gender: Gender;
@@ -40,34 +34,19 @@ type FamilyStore = {
   future: FamilyGraph[];
   viewMode: ViewMode;
   selectedPersonId: string | null;
-  chat: ChatTurn[];
-  isThinking: boolean;
   selectPerson: (personId: string | null) => void;
   addPerson: (input: AddPersonInput) => void;
   updatePerson: (personId: string, patch: Partial<PersonData>) => void;
   deletePerson: (personId: string) => void;
-  replaceGraph: (graph: FamilyGraph, note: string) => void;
-  /** Opens a saved genogram; undo history and chat belong to the previous client, so both start fresh. */
+  replaceGraph: (graph: FamilyGraph) => void;
+  /** Opens a saved genogram; undo history belongs to the previous client, so it starts fresh. */
   loadGraph: (graph: FamilyGraph) => void;
   reset: () => void;
   setCollateralScale: (scale: CollateralScale) => void;
   undo: () => void;
   redo: () => void;
   setViewMode: (mode: ViewMode) => void;
-  setThinking: (value: boolean) => void;
-  appendChat: (turn: ChatTurn) => void;
 };
-
-function createInitialChat(): ChatTurn[] {
-  return [
-    {
-      id: "welcome",
-      role: "assistant",
-      content:
-        "누구와 누구 사이인지 인물 번호로 분명히 적어 주세요. 예: 인물1과 인물2 사이에 갈등 표시해줘. 인물5와 인물7 사이에 단절 표시해줘.",
-    },
-  ];
-}
 
 /** The collateral size is a drawing choice for this genogram, so rebuilding its people must not reset it. */
 function keepCollateralScale(next: FamilyGraph, current: FamilyGraph): FamilyGraph {
@@ -86,16 +65,12 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
   future: [],
   viewMode: "edit",
   selectedPersonId: null,
-  chat: createInitialChat(),
-  isThinking: false,
   loadGraph: (graph) =>
     set({
       graph: ensureDisplayNumbers(snapshotGraph(graph)),
       past: [],
       future: [],
       selectedPersonId: null,
-      chat: createInitialChat(),
-      isThinking: false,
     }),
   selectPerson: (personId) => set({ selectedPersonId: personId }),
   addPerson: (input) =>
@@ -120,16 +95,12 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
         selectedPersonId: keepSelection(state.selectedPersonId, graph),
       };
     }),
-  replaceGraph: (graph, note) =>
+  replaceGraph: (graph) =>
     set((state) => ({
       past: pushGraphHistory(state.past, state.graph),
       future: [],
       graph: ensureDisplayNumbers(keepCollateralScale(graph, state.graph)),
       selectedPersonId: keepSelection(state.selectedPersonId, graph),
-      chat: [
-        ...state.chat,
-        { id: crypto.randomUUID(), role: "assistant", content: note },
-      ],
     })),
   reset: () =>
     set((state) => ({
@@ -166,9 +137,4 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
       };
     }),
   setViewMode: (mode) => set({ viewMode: mode }),
-  setThinking: (value) => set({ isThinking: value }),
-  appendChat: (turn) =>
-    set((state) => ({
-      chat: [...state.chat, turn],
-    })),
 }));

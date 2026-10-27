@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { CollateralScalePicker } from "@/components/genogram/CollateralScalePicker";
 import { EmotionLegend } from "@/components/genogram/EmotionLegend";
 import { GenogramCanvas } from "@/components/genogram/GenogramCanvas";
-import { ChatPanel } from "@/components/panel/ChatPanel";
+import { InteractionPanel } from "@/components/panel/InteractionPanel";
 import { PersonForm } from "@/components/panel/PersonForm";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,8 +20,8 @@ import { useFamilyStore } from "@/store/family-store";
 const VIEW_MODE_EDIT: ViewMode = "edit";
 const VIEW_MODE_OUTPUT: ViewMode = "final";
 const SIDEBAR_FORM = "form" as const;
-const SIDEBAR_CHAT = "chat" as const;
-type SidebarPanel = typeof SIDEBAR_FORM | typeof SIDEBAR_CHAT;
+const SIDEBAR_INTERACTION = "interaction" as const;
+type SidebarPanel = typeof SIDEBAR_FORM | typeof SIDEBAR_INTERACTION;
 const PERSON_PANEL_LABEL = "인물정보";
 const INTERACTION_PANEL_LABEL = "인물 간 상호작용";
 const RESET_CONFIRM_MESSAGE = "캔버스의 모든 인물과 관계를 지울까요? 저장하기 전에는 되돌리기로 복구할 수 있습니다.";
@@ -46,13 +46,13 @@ function SidebarModeSwitch({
       className="w-full rounded-lg border p-0.5"
       onValueChange={(values) => {
         const next = values[0];
-        if (next === SIDEBAR_FORM || next === SIDEBAR_CHAT) onChange(next);
+        if (next === SIDEBAR_FORM || next === SIDEBAR_INTERACTION) onChange(next);
       }}
     >
       <ToggleGroupItem value={SIDEBAR_FORM} className={SIDEBAR_MODE_ITEM_CLASS}>
         {PERSON_PANEL_LABEL}
       </ToggleGroupItem>
-      <ToggleGroupItem value={SIDEBAR_CHAT} className={SIDEBAR_MODE_ITEM_CLASS}>
+      <ToggleGroupItem value={SIDEBAR_INTERACTION} className={SIDEBAR_MODE_ITEM_CLASS}>
         {INTERACTION_PANEL_LABEL}
       </ToggleGroupItem>
     </ToggleGroup>
@@ -160,15 +160,9 @@ export function Studio() {
           <div className="shrink-0 px-5 pt-5">
             <SidebarModeSwitch panel={sidebarPanel} onChange={setSidebarPanel} />
           </div>
-          {sidebarPanel === SIDEBAR_CHAT ? (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-5">
-              <ChatPanel />
-            </div>
-          ) : (
-            <div className="min-h-0 flex-1 overflow-auto p-5">
-              <PersonForm />
-            </div>
-          )}
+          <div className="min-h-0 flex-1 overflow-auto p-5">
+            {sidebarPanel === SIDEBAR_INTERACTION ? <InteractionPanel /> : <PersonForm />}
+          </div>
         </aside>
         <main className="flex min-h-0 flex-col overflow-hidden bg-[var(--genogram-paper)]">
           <div className="relative min-h-0 flex-1 overflow-hidden">

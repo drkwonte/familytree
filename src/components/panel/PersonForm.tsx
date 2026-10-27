@@ -5,7 +5,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { personCode, personHasParent } from "@/lib/genogram/relations";
+import { NATIVE_SELECT_CLASS_NAME } from "@/components/forms/select-class";
+import { personCode, personHasParent, personOptionLabel } from "@/lib/genogram/relations";
 import type {
   FamilyGraph,
   FamilyNode,
@@ -29,9 +30,6 @@ const RELATION_OPTIONS: { value: RelativeRelation; label: string }[] = [
 ];
 
 const NEW_PERSON_FORM_KEY = "new-person";
-
-const selectClassName =
-  "h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50";
 
 type FormFields = {
   gender: Gender;
@@ -174,7 +172,7 @@ function PersonFormFields() {
           <Label htmlFor="gender">성별</Label>
           <select
             id="gender"
-            className={selectClassName}
+            className={NATIVE_SELECT_CLASS_NAME}
             value={fields.gender}
             onChange={(event) => patchField("gender", event.target.value as Gender)}
           >
@@ -187,7 +185,7 @@ function PersonFormFields() {
           <Label htmlFor="vital">생사/상태</Label>
           <select
             id="vital"
-            className={selectClassName}
+            className={NATIVE_SELECT_CLASS_NAME}
             value={fields.vitalStatus}
             onChange={(event) => patchField("vitalStatus", event.target.value as VitalStatus)}
           >
@@ -232,14 +230,13 @@ function PersonFormFields() {
             <Label htmlFor="anchor">기준 인물 *</Label>
             <select
               id="anchor"
-              className={selectClassName}
+              className={NATIVE_SELECT_CLASS_NAME}
               value={anchorId}
               onChange={(event) => setAnchorId(event.target.value)}
             >
               {graph.nodes.map((node) => (
                 <option key={node.id} value={node.id}>
-                  {personCode(node.data.displayNumber)}
-                  {node.data.occupation ? ` · ${node.data.occupation}` : ""}
+                  {personOptionLabel(node)}
                 </option>
               ))}
             </select>
@@ -248,7 +245,7 @@ function PersonFormFields() {
             <Label htmlFor="relation">기준 인물과의 관계 *</Label>
             <select
               id="relation"
-              className={selectClassName}
+              className={NATIVE_SELECT_CLASS_NAME}
               value={relation}
               onChange={(event) => setRelation(event.target.value as RelativeRelation | "")}
             >

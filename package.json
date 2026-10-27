@@ -7,12 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test \"src/lib/**/*.test.ts\"",
-    "gen:chat-function": "tsx scripts/generate-chat-function.ts"
+    "test": "tsx --test \"src/lib/**/*.test.ts\""
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
-    "@google/genai": "^2.24.0",
     "@supabase/supabase-js": "^2.117.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
