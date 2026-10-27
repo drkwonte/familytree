@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { NATIVE_SELECT_CLASS_NAME } from "@/components/forms/select-class";
+import { hasCurrentSpouse } from "@/lib/genogram/partners";
 import { personCode, personHasParent, personOptionLabel } from "@/lib/genogram/relations";
 import type {
   FamilyGraph,
@@ -129,6 +130,7 @@ function PersonFormFields() {
       relation,
       anchorId,
       anchorHasParent: personHasParent(graph, anchorId),
+      anchorHasCurrentSpouse: hasCurrentSpouse(graph, anchorId),
     });
     if (error) {
       window.alert(error);

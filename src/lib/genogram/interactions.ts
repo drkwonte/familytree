@@ -1,5 +1,7 @@
 import { type InteractionAction, RELATION_KIND_LABELS, type RelationKind } from "./interaction-options";
+import { hasCurrentSpouse, makesCurrentSpouse } from "./partners";
 import { addHousehold, createEdgeId, isCoupleKind, personCode } from "./relations";
+import { SPOUSE_ALREADY_EXISTS_MESSAGE } from "./validate";
 import { EMOTIONAL_KINDS, type FamilyEdge, type FamilyGraph, type FamilyNode, type Household, type StructuralKind } from "./types";
 
 /** One counselor pick from the interaction menus: person A, person B and what to draw between them. */
@@ -36,7 +38,15 @@ function sameRelationFamily(edge: FamilyEdge, kind: string): boolean {
   return false;
 }
 
+/** One current spouse at a time: a second marriage is only drawn once the first ended in divorce. */
+function marriesSomeoneMarried(graph: FamilyGraph, pair: Pair, kind: RelationKind): boolean {
+  if (!makesCurrentSpouse(kind)) return false;
+  const { first, second } = pair;
+  return hasCurrentSpouse(graph, first.id, second.id) || hasCurrentSpouse(graph, second.id, first.id);
+}
+
 function setRelation(graph: FamilyGraph, pair: Pair, kind: RelationKind): InteractionResult {
+  if (marriesSomeoneMarried(graph, pair, kind)) return failure(SPOUSE_ALREADY_EXISTS_MESSAGE);
   const label = RELATION_KIND_LABELS[kind];
   const existing = graph.edges.find((edge) => joinsPair(edge, pair) && sameRelationFamily(edge, kind));
   if (existing?.kind === kind) return failure(`${pair.name} 사이에는 이미 ${label} 관계가 표시되어 있습니다.`);

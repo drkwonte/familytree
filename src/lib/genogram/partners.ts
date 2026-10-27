@@ -2,6 +2,8 @@ import { isCoupleKind } from "./relations";
 import type { FamilyEdge, FamilyGraph, FamilyNode, Gender } from "./types";
 
 const PARENT_KINDS: ReadonlySet<string> = new Set(["parent", "adopted", "foster"]);
+/** Couple lines that leave a person free to marry again: an ended marriage, or a partner who never was a spouse. */
+const NOT_A_CURRENT_SPOUSE_KINDS: ReadonlySet<string> = new Set(["divorce", "affair"]);
 
 /** Left-to-right seats for a couple: husband left, wife right, unknown gender last. */
 export function coupleOrder(a: FamilyNode, b: FamilyNode): [FamilyNode, FamilyNode] {
@@ -21,6 +23,21 @@ function partnerIds(graph: FamilyGraph, personId: string): string[] {
   return graph.edges
     .filter((edge) => isCoupleEdge(edge) && (edge.source === personId || edge.target === personId))
     .map((edge) => partnerOn(edge, personId));
+}
+
+export function makesCurrentSpouse(kind: string): boolean {
+  return isCoupleKind(kind) && !NOT_A_CURRENT_SPOUSE_KINDS.has(kind);
+}
+
+/** Whether this person is still married or living with someone, apart from `ignoredPartnerId`. */
+export function hasCurrentSpouse(graph: FamilyGraph, personId: string, ignoredPartnerId?: string): boolean {
+  return graph.edges.some(
+    (edge) =>
+      edge.category === "structural" &&
+      makesCurrentSpouse(edge.kind) &&
+      (edge.source === personId || edge.target === personId) &&
+      partnerOn(edge, personId) !== ignoredPartnerId,
+  );
 }
 
 function childIdsOf(graph: FamilyGraph, parentId: string): Set<string> {
