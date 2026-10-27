@@ -2,6 +2,7 @@ import {
   CHAT_ERRORS,
   CHAT_FUNCTION_NAME,
   GEMINI_API_KEY_NAME,
+  GEMINI_CREDITS_DEPLETED_HTTP_STATUS,
   GEMINI_MODEL,
   GEMINI_REGION_BLOCKED_STATUS,
   GEMINI_RETRY_DELAY_MS,
@@ -31,6 +32,7 @@ const GEMINI_TIMEOUT_MS = ${GEMINI_TIMEOUT_MS};
 const GEMINI_RETRY_DELAY_MS = ${GEMINI_RETRY_DELAY_MS};
 const GEMINI_RETRY_STATUSES = ${JSON.stringify(GEMINI_RETRY_STATUSES)};
 const GEMINI_REGION_BLOCKED_STATUS = ${JSON.stringify(GEMINI_REGION_BLOCKED_STATUS)};
+const GEMINI_CREDITS_DEPLETED_HTTP_STATUS = ${GEMINI_CREDITS_DEPLETED_HTTP_STATUS};
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-region",
@@ -82,6 +84,7 @@ function requestGemini(prompt, apiKey) {
 }
 
 async function rejectionMessage(response) {
+  if (response.status === GEMINI_CREDITS_DEPLETED_HTTP_STATUS) return CHAT_ERRORS.modelCreditsDepleted;
   const payload = await response.json().catch(() => null);
   return payload?.error?.status === GEMINI_REGION_BLOCKED_STATUS ? CHAT_ERRORS.modelRegionBlocked : CHAT_ERRORS.modelFailed;
 }

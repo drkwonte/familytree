@@ -145,6 +145,19 @@ test("a model that refuses the server's region says so instead of a generic fail
   assert.equal(gemini.calls(), 1);
 });
 
+test("depleted AI credits are named, since retrying cannot help until billing is topped up", async () => {
+  const gemini = stubGemini(
+    Response.json(
+      { error: { code: 402, message: "Your prepayment credits are depleted.", status: "RESOURCE_EXHAUSTED" } },
+      { status: 402 },
+    ),
+  );
+  const response = await post(validBody);
+  assert.equal(response.status, 502);
+  assert.equal(await errorOf(response), CHAT_ERRORS.modelCreditsDepleted);
+  assert.equal(gemini.calls(), 1);
+});
+
 test("other model rejections stay a generic failure", async () => {
   stubGemini(Response.json({ error: { code: 400, status: "INVALID_ARGUMENT" } }, { status: 400 }));
   const response = await post(validBody);
