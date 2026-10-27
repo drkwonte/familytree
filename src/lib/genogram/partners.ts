@@ -81,14 +81,17 @@ export function isLaterPartnerEdge(graph: FamilyGraph, edge: FamilyEdge): boolea
   return isCoupleEdge(edge) && (isLaterPartner(graph, edge.source) || isLaterPartner(graph, edge.target));
 }
 
+/** Which side of this person a partner sits on by the husband-left rule: +1 for right, -1 for left. */
+export function partnerSide(person: FamilyNode, partner: FamilyNode): 1 | -1 {
+  return coupleOrder(person, partner)[0].id === person.id ? 1 : -1;
+}
+
 /**
- * Later partners sit on the side away from the main spouse, whatever their gender:
- * the husband-left rule would put them inside the first couple and break its lines.
- * Returns +1 for the right side and -1 for the left.
+ * A later partner on the main spouse's side sits between the first couple, so that
+ * couple must leave room; one on the other side only needs room beside the person.
  */
-export function laterPartnerSide(graph: FamilyGraph, person: FamilyNode): 1 | -1 {
+export function sitsInsideFirstCouple(graph: FamilyGraph, person: FamilyNode, partner: FamilyNode): boolean {
   const spouseId = findSpouseId(graph, person.id);
   const spouse = spouseId ? graph.nodes.find((node) => node.id === spouseId) : undefined;
-  if (!spouse) return 1;
-  return coupleOrder(person, spouse)[0].id === person.id ? -1 : 1;
+  return spouse != null && partnerSide(person, spouse) === partnerSide(person, partner);
 }

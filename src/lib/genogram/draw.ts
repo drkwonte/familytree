@@ -22,15 +22,14 @@ import {
   HOUSEHOLD_DASH,
   INDEX_RING_GAP,
   LABEL_LINE_HEIGHT,
+  LATER_PARTNER_NECK,
   NOTE_GAP_BELOW,
   NODE_HALF,
-  NOTE_COLOR,
   PERSON_CODE_COLOR,
   SHAPE_OUTLINE_CLEARANCE,
   STRUCTURE_COLOR,
   STRUCTURE_WIDTH,
   TEXT_BACKDROP_OPACITY,
-  YEAR_COLOR,
   YEAR_GAP_ABOVE,
 } from "./constants";
 import { glyphReach, hasIndexRing } from "./glyph";
@@ -401,7 +400,8 @@ function drawnCoupleBarY(directLine: Set<string>, bar: CoupleBar, collateralScal
     personScale(directLine, bar.leftId, collateralScale),
     personScale(directLine, bar.rightId, collateralScale),
   );
-  return bar.leftCenterY + NODE_HALF * glyph + DROP_LENGTH * scale;
+  const neck = bar.laterPartner ? LATER_PARTNER_NECK : DROP_LENGTH * scale;
+  return bar.leftCenterY + NODE_HALF * glyph + neck;
 }
 
 export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "edit"): string {
@@ -437,7 +437,7 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
     layers.push(coupleMarks(String(bar.kind), midX, barY));
     if (bar.year) {
       layers.push(
-        `<text x="${midX}" y="${barY - 5}" text-anchor="middle" font-size="11" fill="${YEAR_COLOR}">${coupleYearCaption(String(bar.kind), bar.year)}</text>`,
+        `<text x="${midX}" y="${barY - 5}" text-anchor="middle" font-size="11" fill="${STRUCTURE_COLOR}">${coupleYearCaption(String(bar.kind), bar.year)}</text>`,
       );
     }
   }
@@ -445,6 +445,7 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
   for (const drop of layout.childDrops) {
     const sourceBar = layout.coupleBars.find(
       (bar) =>
+        !bar.laterPartner &&
         Math.abs(bar.barY - drop.fromY) < 0.01 &&
         drop.x + 0.01 >= Math.min(bar.leftX, bar.rightX) &&
         drop.x - 0.01 <= Math.max(bar.leftX, bar.rightX),
@@ -481,7 +482,7 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
           node.x,
           shapeTop - YEAR_GAP_ABOVE,
           String(node.data.birthYear),
-          YEAR_COLOR,
+          STRUCTURE_COLOR,
           shapeTop,
           shapeBottom,
         ),
@@ -492,7 +493,7 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
     if (node.data.occupation) notes.push(node.data.occupation);
     notes.push(...node.data.tags);
     notes.forEach((note, index) => {
-      const fill = viewMode === "edit" && index === 0 ? PERSON_CODE_COLOR : NOTE_COLOR;
+      const fill = viewMode === "edit" && index === 0 ? PERSON_CODE_COLOR : STRUCTURE_COLOR;
       labels.push(
         labeledText(
           node.x,

@@ -80,26 +80,26 @@ function overlappedBy(layout: FamilyLayout, graph: FamilyGraph, personId: string
     .map((other) => `인물${other.data.displayNumber}`);
 }
 
-test("a remarried mother's new husband sits on her far side from the first husband, on her row", () => {
+test("a remarried mother's new husband keeps the husband-left rule, between her and the first husband", () => {
   const { graph, partnerId } = remarry(threeGenerations(), MOTHER, "M");
   const layout = layoutFamily(graph);
   const mother = point(layout, idOf(graph, MOTHER));
   const father = point(layout, idOf(graph, FATHER));
   const partner = point(layout, partnerId);
-  assert.ok(father.x < mother.x, "the first husband keeps the left seat");
-  assert.ok(partner.x > mother.x, "the new husband goes to the right even though he is a man");
-  assert.ok(partner.x - mother.x < MIN_COUPLE_GAP, "and stays right beside her");
+  assert.ok(father.x < partner.x && partner.x < mother.x, "the new husband sits on her left, inside the first couple");
+  assert.ok(mother.x - partner.x < MIN_COUPLE_GAP, "and stays right beside her");
   assert.equal(partner.y, mother.y);
   assert.deepEqual(overlappedBy(layout, graph, partnerId), []);
 });
 
-test("a remarried father's new wife sits on his far side, to his left", () => {
+test("a remarried father's new wife sits on his right, between him and the first wife", () => {
   const { graph, partnerId } = remarry(threeGenerations(), FATHER, "F");
   const layout = layoutFamily(graph);
   const father = point(layout, idOf(graph, FATHER));
+  const mother = point(layout, idOf(graph, MOTHER));
   const partner = point(layout, partnerId);
-  assert.ok(partner.x < father.x);
-  assert.ok(father.x - partner.x < MIN_COUPLE_GAP);
+  assert.ok(father.x < partner.x && partner.x < mother.x);
+  assert.ok(partner.x - father.x < MIN_COUPLE_GAP);
   assert.equal(partner.y, father.y);
   assert.deepEqual(overlappedBy(layout, graph, partnerId), []);
 });
@@ -118,24 +118,27 @@ test("the first marriage still holds the children and the later one is its own c
   const firstBar = layout.coupleBars.find((bar) => bar.kind === "divorce")!;
   assert.ok(client.x > firstBar.leftX && client.x < firstBar.rightX, "the client still hangs from the first marriage");
   const laterBar = layout.coupleBars.find((bar) => [bar.leftId, bar.rightId].includes(partnerId))!;
-  assert.equal(laterBar.leftId, idOf(graph, MOTHER));
-  assert.equal(laterBar.leftX, mother.x);
-  assert.equal(laterBar.rightX, point(layout, partnerId).x);
+  assert.equal(laterBar.leftId, partnerId);
+  assert.equal(laterBar.rightId, idOf(graph, MOTHER));
+  assert.equal(laterBar.leftX, point(layout, partnerId).x);
+  assert.equal(laterBar.rightX, mother.x);
   assert.equal(laterBar.kind, "remarriage");
+  assert.ok(laterBar.barY < firstBar.barY, "the remarriage line runs above the first couple's line, not on it");
 });
 
-test("the mother's younger sibling moves over instead of landing on the new husband", () => {
+test("the mother's older sibling on the new husband's side moves over instead of landing on him", () => {
   let base = threeGenerations();
   base = addRelative(base, { name: "", gender: "M", relation: "sibling", anchorId: idOf(base, MOTHER) });
-  base = withBirthYear(base, base.nodes.length, 1985);
+  base = withBirthYear(base, base.nodes.length, 1975);
+  const siblingId = base.nodes[base.nodes.length - 1].id;
+  base = addRelative(base, { name: "", gender: "M", relation: "child", anchorId: siblingId });
   const { graph, partnerId } = remarry(base, MOTHER, "M");
   const layout = layoutFamily(graph);
-  const sibling = point(layout, graph.nodes[base.nodes.length - 1].id);
-  assert.ok(sibling.x > point(layout, partnerId).x, "the younger sibling stays to the right of the new husband");
+  assert.ok(point(layout, siblingId).x < point(layout, partnerId).x, "the older sibling stays to the left of him");
   assert.deepEqual(overlappedBy(layout, graph, partnerId), []);
 });
 
-test("a remarried client keeps the first spouse beside them and the later one outside", () => {
+test("a remarried client's later husband sits inside the first couple without touching the first husband", () => {
   let graph = addRelative(EMPTY_GRAPH, { name: "", gender: "F", relation: "self", isIndexPerson: true });
   graph = addRelative(graph, { name: "", gender: "M", relation: "spouse", anchorId: idOf(graph, CLIENT) });
   graph = addRelative(graph, { name: "", gender: "M", relation: "child", anchorId: idOf(graph, CLIENT) });
@@ -145,7 +148,8 @@ test("a remarried client keeps the first spouse beside them and the later one ou
   const client = point(layout, idOf(graph, CLIENT));
   assert.ok(directLineIds(graph).has(idOf(graph, FATHER)), "the co-parent stays on the direct line");
   assert.equal(directLineIds(graph).has(partnerId), false);
-  assert.ok(point(layout, partnerId).x > client.x);
+  const firstHusband = point(layout, idOf(graph, FATHER));
+  assert.ok(firstHusband.x < point(layout, partnerId).x && point(layout, partnerId).x < client.x);
   assert.deepEqual(overlappedBy(layout, graph, partnerId), []);
 });
 

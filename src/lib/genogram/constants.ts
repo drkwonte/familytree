@@ -41,6 +41,8 @@ export const CHILD_SLOT_WIDTH = NODE_SIZE + SIBLING_CLEARANCE;
  * between siblings, so the remarriage still reads as a couple and not as a sibling.
  */
 export const LATER_PARTNER_CLEARANCE = SIBLING_CLEARANCE;
+/** A later partner's couple line drops half a neck, so it runs above the first couple's line instead of on it. */
+export const LATER_PARTNER_NECK = DROP_LENGTH / 2;
 export const CHILD_DROP_INSET = 28;
 export const MIN_COUPLE_GAP = 80;
 /**
@@ -78,8 +80,6 @@ export const STRUCTURE_WIDTH = 1.7;
 export const DEATH_MARK_INSET = STRUCTURE_WIDTH / 2;
 export const CIRCLE_DEATH_MARK_ARM = (NODE_HALF - DEATH_MARK_INSET) / Math.SQRT2;
 export const FILL_COLOR = "#ffffff";
-export const YEAR_COLOR = "#44403c";
-export const NOTE_COLOR = "#57534e";
 export const PERSON_CODE_COLOR = "#0f766e";
 /** Fixed break in the middle of a cutoff line. Never grows with the line. */
 export const CUTOFF_GAP = 8;

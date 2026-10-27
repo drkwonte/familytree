@@ -61,7 +61,7 @@ export function GenogramCanvas({ graph, viewMode, onSelectPerson }: GenogramCanv
   if (!svg || !size) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-        왼쪽에서 인물을 추가하거나 챗봇으로 가족을 설명해 주세요.
+        왼쪽 인물정보에서 인물을 추가해 주세요.
       </div>
     );
   }
