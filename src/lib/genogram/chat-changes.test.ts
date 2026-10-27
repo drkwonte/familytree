@@ -107,6 +107,12 @@ test("a parent line can become adoption without changing who is the parent", () 
   assert.ok(line, "the father stays the source of the adoption line");
 });
 
+test("only the changes that were really made are listed as applied", () => {
+  const drawn = { type: "setRelation", from: 2, to: 3, kind: "conflict" } as const;
+  const { applied } = applyChatChanges(family(), [drawn, { type: "setRelation", from: 2, to: 99, kind: "conflict" }]);
+  assert.deepEqual(applied, [drawn]);
+});
+
 test("people who are not in the genogram are reported, not invented", () => {
   const graph = family();
   const { graph: next, problems } = applyChatChanges(graph, [

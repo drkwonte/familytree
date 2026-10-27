@@ -4,7 +4,8 @@ import { ArrowUp } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { applyChatChanges } from "@/lib/genogram/chat-changes";
+import { applyChatChanges, type ChatChange } from "@/lib/genogram/chat-changes";
+import { describeChatChanges, parseRelationCommand } from "@/lib/genogram/chat-commands";
 import { requestChatChanges } from "@/lib/genogram/chat-client";
 import { useFamilyStore } from "@/store/family-store";
 
@@ -25,23 +26,37 @@ export function ChatPanel() {
     setError(null);
     appendChat({ id: crypto.randomUUID(), role: "user", content: trimmed });
     setMessage("");
+    const commandChanges = parseRelationCommand(trimmed);
+    if (commandChanges) {
+      commitChanges(commandChanges, (applied) => [describeChatChanges(applied)]);
+      return;
+    }
+    await askModel(trimmed);
+  }
+
+  async function askModel(text: string) {
     setThinking(true);
     try {
-      const reply = await requestChatChanges(trimmed, graph);
+      const reply = await requestChatChanges(text, graph);
       if (!reply.ok) {
         reportFailure(reply.error);
         return;
       }
-      // Applied to the graph as it is now, so edits made while the model was thinking survive.
-      const applied = applyChatChanges(useFamilyStore.getState().graph, reply.changes);
-      const note = [reply.assistantMessage, ...reply.problems, ...applied.problems].join("\n");
-      if (applied.graph === useFamilyStore.getState().graph) {
-        appendChat({ id: crypto.randomUUID(), role: "assistant", content: note });
-      } else {
-        replaceGraph(applied.graph, note);
-      }
+      commitChanges(reply.changes, () => [reply.assistantMessage, ...reply.problems]);
     } finally {
       setThinking(false);
+    }
+  }
+
+  /** Applied to the graph as it is now, so edits made while the model was thinking survive. */
+  function commitChanges(changes: ChatChange[], summarize: (applied: ChatChange[]) => string[]) {
+    const current = useFamilyStore.getState().graph;
+    const result = applyChatChanges(current, changes);
+    const note = [...summarize(result.applied), ...result.problems].join("\n");
+    if (result.graph === current) {
+      appendChat({ id: crypto.randomUUID(), role: "assistant", content: note });
+    } else {
+      replaceGraph(result.graph, note);
     }
   }
 

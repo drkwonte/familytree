@@ -175,13 +175,18 @@ function applyChange(graph: FamilyGraph, change: ChatChange): Applied {
 }
 
 /** Applies every change it can; each one it cannot is explained in `problems` rather than guessed at. */
-export function applyChatChanges(graph: FamilyGraph, changes: ChatChange[]): { graph: FamilyGraph; problems: string[] } {
+export function applyChatChanges(
+  graph: FamilyGraph,
+  changes: ChatChange[],
+): { graph: FamilyGraph; applied: ChatChange[]; problems: string[] } {
   const problems: string[] = [];
+  const applied: ChatChange[] = [];
   let next = graph;
   for (const change of changes) {
-    const applied = applyChange(next, change);
-    next = applied.graph;
-    if (applied.problem) problems.push(applied.problem);
+    const result = applyChange(next, change);
+    next = result.graph;
+    if (result.problem) problems.push(result.problem);
+    else applied.push(change);
   }
-  return { graph: next, problems };
+  return { graph: next, applied, problems };
 }
