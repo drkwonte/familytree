@@ -16,7 +16,12 @@ import {
   NODE_SIZE,
 } from "./constants";
 import { directLineIds, familyOfOriginIds, layoutFamily } from "./layout";
-import { findSpouseId } from "./partners";
+import {
+  assertChildrenStayOnTheirCoupleBar,
+  assertCollateralDoesNotCoverDirect,
+  assertNoDropCrossesForeignGlyph,
+  assertNoGlyphOverlap,
+} from "./test-support/layout-assertions";
 import { addRelative, deletePerson, isCoupleKind } from "./relations";
 import { EMPTY_GRAPH, type FamilyGraph } from "./types";
 import { SIBLING_NEEDS_PARENT_MESSAGE, validateNewPerson } from "./validate";
@@ -899,42 +904,6 @@ test("child and sibling relations follow the chosen gender", () => {
   const sibling = graph.nodes.find((node) => node.id !== me && node.id !== child.id)!;
   assert.equal(sibling.data.gender, "F");
 });
-
-function assertChildrenStayOnTheirCoupleBar(graph: FamilyGraph, layout: ReturnType<typeof layoutFamily>) {
-  const direct = directLineIds(graph);
-  for (const bar of layout.coupleBars) {
-    const children = layout.nodes.filter((node) =>
-      graph.edges.some(
-        (edge) =>
-          edge.category === "structural" &&
-          ["parent", "adopted", "foster"].includes(edge.kind) &&
-          edge.target === node.id &&
-          (edge.source === bar.leftId || edge.source === bar.rightId),
-      ),
-    );
-    const unique = [...new Map(children.map((child) => [child.id, child])).values()];
-    if (unique.length === 0) continue;
-    const left = layout.nodes.find((node) => node.id === bar.leftId)!;
-    const right = layout.nodes.find((node) => node.id === bar.rightId)!;
-    assert.equal(left.x, bar.leftX);
-    assert.equal(right.x, bar.rightX);
-    const collateral = !direct.has(bar.leftId) && !direct.has(bar.rightId);
-    const inset = collateral ? CHILD_DROP_INSET * layout.collateralScale : CHILD_DROP_INSET;
-    for (const child of unique) {
-      assert.ok(child.x >= bar.leftX + inset - 0.01, `${child.data.displayNumber} misses the left inset`);
-      assert.ok(child.x <= bar.rightX - inset + 0.01, `${child.data.displayNumber} misses the right inset`);
-      assert.ok(Math.abs(child.x - bar.leftX) > 1);
-      assert.ok(Math.abs(child.x - bar.rightX) > 1);
-    }
-    for (const child of unique) {
-      const drop = layout.childDrops.find(
-        (item) => item.fromY === bar.barY && Math.abs(item.x - child.x) < 0.01 && item.toY === child.y,
-      );
-      assert.ok(drop);
-      assert.equal(drop.fromX, undefined);
-    }
-  }
-}
 
 test("child drops stay inset on the couple bar instead of under the parents", () => {
   let graph = addRelative(EMPTY_GRAPH, {
@@ -1841,22 +1810,6 @@ test("both sides growing at once still keep families of origin apart", () => {
   assertFamiliesStayOnOwnSides(graph, grown, spouseId, indexId);
 });
 
-function assertNoGlyphOverlap(graph: FamilyGraph, layout: ReturnType<typeof layoutFamily>) {
-  const direct = directLineIds(graph);
-  const half = (personId: string) =>
-    direct.has(personId) ? NODE_HALF : NODE_HALF * layout.collateralScale;
-  for (let left = 0; left < layout.nodes.length; left += 1) {
-    for (let right = left + 1; right < layout.nodes.length; right += 1) {
-      const a = layout.nodes[left];
-      const b = layout.nodes[right];
-      const overlaps =
-        Math.abs(a.x - b.x) < half(a.id) + half(b.id) &&
-        Math.abs(a.y - b.y) < half(a.id) + half(b.id);
-      assert.equal(overlaps, false, `${a.data.displayNumber} overlaps ${b.data.displayNumber}`);
-    }
-  }
-}
-
 test("the mother's brother stays on her side, and his family uses one collateral scale", () => {
   let graph = addRelative(EMPTY_GRAPH, {
     name: "",
@@ -1956,63 +1909,6 @@ test("the mother's brother stays on her side, and his family uses one collateral
 
 function addedPerson(before: FamilyGraph, after: FamilyGraph) {
   return after.nodes.find((node) => !before.nodes.some((existing) => existing.id === node.id))!;
-}
-
-function sharesBirthRowWithDirect(graph: FamilyGraph, personId: string, direct: Set<string>): boolean {
-  for (const edge of graph.edges) {
-    if (edge.category !== "structural" || edge.target !== personId) continue;
-    if (!["parent", "adopted", "foster"].includes(edge.kind)) continue;
-    const siblingIsDirect = graph.edges.some(
-      (other) =>
-        other.category === "structural" &&
-        ["parent", "adopted", "foster"].includes(other.kind) &&
-        other.source === edge.source &&
-        other.target !== personId &&
-        direct.has(other.target),
-    );
-    if (siblingIsDirect) return true;
-  }
-  return false;
-}
-
-function assertCollateralDoesNotCoverDirect(graph: FamilyGraph, layout: ReturnType<typeof layoutFamily>) {
-  const direct = directLineIds(graph);
-  const half = (personId: string) =>
-    direct.has(personId) ? NODE_HALF : NODE_HALF * layout.collateralScale;
-  for (const node of layout.nodes) {
-    if (direct.has(node.id) || sharesBirthRowWithDirect(graph, node.id, direct)) continue;
-    const spouseId = findSpouseId(graph, node.id);
-    if (spouseId && sharesBirthRowWithDirect(graph, spouseId, direct)) continue;
-    for (const other of layout.nodes) {
-      if (!direct.has(other.id) || node.y >= other.y) continue;
-      const horizontalGap = Math.abs(node.x - other.x) - half(node.id) - half(other.id);
-      const verticalGap = Math.abs(node.y - other.y) - half(node.id) - half(other.id);
-      const covers = horizontalGap < 0 && verticalGap < COLLATERAL_DIRECT_AIR;
-      assert.equal(
-        covers,
-        false,
-        `${node.data.displayNumber} covers ${other.data.displayNumber}`,
-      );
-    }
-  }
-}
-
-function assertNoDropCrossesForeignGlyph(graph: FamilyGraph, layout: ReturnType<typeof layoutFamily>) {
-  const direct = directLineIds(graph);
-  const half = (personId: string) =>
-    direct.has(personId) ? NODE_HALF : NODE_HALF * layout.collateralScale;
-  for (const drop of layout.childDrops) {
-    const top = Math.min(drop.fromY, drop.toY);
-    const bottom = Math.max(drop.fromY, drop.toY);
-    for (const node of layout.nodes) {
-      if (Math.abs(node.x - drop.x) >= half(node.id)) continue;
-      if (Math.abs(node.y - drop.toY) < 1 && Math.abs(node.x - drop.x) < 1) continue;
-      const nodeTop = node.y - half(node.id);
-      const nodeBottom = node.y + half(node.id);
-      const crosses = nodeBottom > top && nodeTop < bottom;
-      assert.equal(crosses, false, `a child line crosses ${node.data.displayNumber}`);
-    }
-  }
 }
 
 test("adding the mother's sister keeps her birth family compact and off the client", () => {

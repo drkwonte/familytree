@@ -4,6 +4,12 @@ import { MIN_COUPLE_GAP } from "./constants";
 import { glyphReach } from "./glyph";
 import { type FamilyLayout, directLineIds, layoutFamily } from "./layout";
 import { addRelative } from "./relations";
+import {
+  assertChildrenStayOnTheirCoupleBar,
+  assertCollateralDoesNotCoverDirect,
+  assertNoDropCrossesForeignGlyph,
+  assertNoGlyphOverlap,
+} from "./test-support/layout-assertions";
 import { EMPTY_GRAPH, type FamilyGraph, type Gender } from "./types";
 
 const CLIENT = 1;
@@ -123,7 +129,132 @@ test("the first marriage still holds the children and the later one is its own c
   assert.equal(laterBar.leftX, point(layout, partnerId).x);
   assert.equal(laterBar.rightX, mother.x);
   assert.equal(laterBar.kind, "remarriage");
-  assert.ok(laterBar.barY < firstBar.barY, "the remarriage line runs above the first couple's line, not on it");
+  assert.ok(laterBar.barY > firstBar.barY, "the remarriage line runs below the first couple's line, not on it");
+});
+
+function parentIdsOf(graph: FamilyGraph, childId: string): string[] {
+  return graph.edges.filter((edge) => edge.kind === "parent" && edge.target === childId).map((edge) => edge.source);
+}
+
+function withChild(graph: FamilyGraph, anchorId: string): { graph: FamilyGraph; childId: string } {
+  const next = addRelative(graph, { name: "", gender: "M", relation: "child", anchorId });
+  return { graph: next, childId: next.nodes[next.nodes.length - 1].id };
+}
+
+function assertDrawnApart(graph: FamilyGraph, layout: FamilyLayout) {
+  assertNoGlyphOverlap(graph, layout);
+  assertChildrenStayOnTheirCoupleBar(graph, layout);
+  assertNoDropCrossesForeignGlyph(graph, layout);
+  assertCollateralDoesNotCoverDirect(graph, layout);
+}
+
+/** Mother has the client and a brother from her first marriage, then two children with her new husband. */
+function motherRemarriedWithChildren() {
+  let base = threeGenerations();
+  base = addRelative(base, { name: "", gender: "M", relation: "sibling", anchorId: idOf(base, CLIENT) });
+  const firstChildIds = [idOf(base, CLIENT), base.nodes[base.nodes.length - 1].id];
+  const remarried = remarry(base, MOTHER, "M");
+  const fromPartner = withChild(remarried.graph, remarried.partnerId);
+  const fromMother = withChild(fromPartner.graph, idOf(base, MOTHER));
+  return {
+    graph: fromMother.graph,
+    partnerId: remarried.partnerId,
+    firstChildIds,
+    laterChildIds: [fromPartner.childId, fromMother.childId],
+  };
+}
+
+test("a child added to a remarried mother belongs to her current husband, not the divorced one", () => {
+  const { graph, partnerId, laterChildIds } = motherRemarriedWithChildren();
+  for (const childId of laterChildIds) {
+    assert.deepEqual(new Set(parentIdsOf(graph, childId)), new Set([idOf(graph, MOTHER), partnerId]));
+  }
+});
+
+test("the remarried mother's children hang from the remarriage line, clear of the first marriage's children", () => {
+  const { graph, partnerId, firstChildIds, laterChildIds } = motherRemarriedWithChildren();
+  const layout = layoutFamily(graph);
+  const laterBar = layout.coupleBars.find((bar) => bar.leftId === partnerId)!;
+  for (const childId of laterChildIds) {
+    const child = point(layout, childId);
+    assert.equal(child.y, point(layout, idOf(graph, CLIENT)).y, "half-siblings share the client's row");
+    assert.ok(child.x > laterBar.leftX && child.x < laterBar.rightX, "and hang between the mother and her new husband");
+  }
+  const firstEdge = Math.max(...firstChildIds.map((id) => point(layout, id).x));
+  const laterEdge = Math.min(...laterChildIds.map((id) => point(layout, id).x));
+  assert.ok(firstEdge < laterEdge, "the first marriage's children stay on the father's side");
+  assertDrawnApart(graph, layout);
+});
+
+test("a remarried father's children with his new wife sit on his side without touching the first children", () => {
+  let base = threeGenerations();
+  base = addRelative(base, { name: "", gender: "F", relation: "sibling", anchorId: idOf(base, CLIENT) });
+  const remarried = remarry(base, FATHER, "F");
+  let { graph } = withChild(remarried.graph, remarried.partnerId);
+  graph = withChild(graph, remarried.partnerId).graph;
+  graph = withChild(graph, remarried.partnerId).graph;
+  const layout = layoutFamily(graph);
+  const laterChildren = layout.nodes.filter((node) => parentIdsOf(graph, node.id).includes(remarried.partnerId));
+  assert.equal(laterChildren.length, 3);
+  const firstChildren = layout.nodes.filter(
+    (node) => parentIdsOf(graph, node.id).includes(idOf(graph, MOTHER)),
+  );
+  assert.ok(Math.max(...laterChildren.map((node) => node.x)) < Math.min(...firstChildren.map((node) => node.x)));
+  assertDrawnApart(graph, layout);
+});
+
+test("a remarried client's children from both marriages are drawn apart under their own couple lines", () => {
+  let graph = addRelative(EMPTY_GRAPH, { name: "", gender: "F", relation: "self", isIndexPerson: true });
+  graph = addRelative(graph, { name: "", gender: "M", relation: "spouse", anchorId: idOf(graph, CLIENT) });
+  graph = withChild(graph, idOf(graph, CLIENT)).graph;
+  graph = withChild(graph, idOf(graph, CLIENT)).graph;
+  graph = divorced(graph, CLIENT, FATHER);
+  graph = addRelative(graph, { name: "", gender: "M", relation: "spouse", anchorId: idOf(graph, CLIENT) });
+  const laterHusbandId = graph.nodes[graph.nodes.length - 1].id;
+  graph = withChild(graph, idOf(graph, CLIENT)).graph;
+  graph = withChild(graph, idOf(graph, CLIENT)).graph;
+  const laterChildren = graph.nodes.filter((node) => parentIdsOf(graph, node.id).includes(laterHusbandId));
+  assert.equal(laterChildren.length, 2);
+  assertDrawnApart(graph, layoutFamily(graph));
+});
+
+test("both parents remarried with children keep all three families apart", () => {
+  const { graph: base } = motherRemarriedWithChildren();
+  let graph = addRelative(base, { name: "", gender: "F", relation: "spouse", anchorId: idOf(base, FATHER) });
+  const stepMotherId = graph.nodes[graph.nodes.length - 1].id;
+  graph = withChild(graph, stepMotherId).graph;
+  graph = withChild(graph, stepMotherId).graph;
+  assertDrawnApart(graph, layoutFamily(graph));
+});
+
+test("a remarried aunt's children from both marriages stay clear at the collateral size", () => {
+  let graph = threeGenerations();
+  graph = addRelative(graph, { name: "", gender: "F", relation: "sibling", anchorId: idOf(graph, MOTHER) });
+  const auntId = graph.nodes[graph.nodes.length - 1].id;
+  graph = addRelative(graph, { name: "", gender: "M", relation: "spouse", anchorId: auntId });
+  const firstUncleId = graph.nodes[graph.nodes.length - 1].id;
+  graph = withChild(graph, auntId).graph;
+  graph = withChild(graph, auntId).graph;
+  graph = {
+    ...graph,
+    edges: graph.edges.map((edge) =>
+      edge.kind === "marriage" && [edge.source, edge.target].includes(firstUncleId) ? { ...edge, kind: "divorce" } : edge,
+    ),
+  };
+  graph = addRelative(graph, { name: "", gender: "M", relation: "spouse", anchorId: auntId });
+  graph = withChild(graph, auntId).graph;
+  graph = withChild(graph, auntId).graph;
+  assertDrawnApart(graph, layoutFamily(graph));
+});
+
+test("a married half-sibling's own family stays clear of everyone else", () => {
+  const { graph: base, laterChildIds } = motherRemarriedWithChildren();
+  let graph = addRelative(base, { name: "", gender: "F", relation: "spouse", anchorId: laterChildIds[0] });
+  graph = withChild(graph, laterChildIds[0]).graph;
+  graph = withChild(graph, laterChildIds[0]).graph;
+  const layout = layoutFamily(graph);
+  assert.ok(layout.nodes.every((node) => Number.isFinite(node.x) && Number.isFinite(node.y)));
+  assertDrawnApart(graph, layout);
 });
 
 test("the mother's older sibling on the new husband's side moves over instead of landing on him", () => {

@@ -148,6 +148,7 @@ function parentalCouples(graph: FamilyGraph) {
     const first = nodes.get(parentIds[0]);
     const second = nodes.get(parentIds[1]);
     if (!first || !second) return [];
+    if (isLaterPartner(graph, first.id) || isLaterPartner(graph, second.id)) return [];
     const [left, right] = coupleOrder(first, second);
     const edge = coupleEdgeBetween(graph, left.id, right.id) ?? {
       id: `parent-unit-${left.id}-${right.id}`,
@@ -211,17 +212,27 @@ function compareSiblingsByAge(left: FamilyNode, right: FamilyNode): number {
   return left.data.displayNumber - right.data.displayNumber;
 }
 
+function parentIdsOf(graph: FamilyGraph, childId: string): string[] {
+  return [...new Set(parentChildEdges(graph).filter((edge) => edge.target === childId).map((edge) => edge.source))];
+}
+
+/**
+ * Every recorded parent is one of the pair. A child with a single recorded parent belongs
+ * to that parent's main couple, so a remarried parent's own child stays with the first marriage.
+ */
+function bornToCouple(graph: FamilyGraph, childId: string, leftId: string, rightId: string): boolean {
+  const parentIds = parentIdsOf(graph, childId);
+  const pair = [leftId, rightId];
+  if (parentIds.length === 0 || !parentIds.every((id) => pair.includes(id))) return false;
+  if (parentIds.length > 1) return true;
+  const mainSpouseId = findSpouseId(graph, parentIds[0]);
+  return mainSpouseId == null || pair.includes(mainSpouseId);
+}
+
 function childrenOfCouple(graph: FamilyGraph, leftId: string, rightId: string): FamilyNode[] {
-  const children = graph.nodes.filter((node) =>
-    graph.edges.some(
-      (edge) =>
-        edge.category === "structural" &&
-        ["parent", "adopted", "foster"].includes(edge.kind) &&
-        edge.target === node.id &&
-        (edge.source === leftId || edge.source === rightId),
-    ),
-  );
-  return [...new Map(children.map((child) => [child.id, child])).values()].sort(compareSiblingsByAge);
+  return graph.nodes
+    .filter((node) => bornToCouple(graph, node.id, leftId, rightId))
+    .sort(compareSiblingsByAge);
 }
 
 export function familyOfOriginIds(graph: FamilyGraph, personId: string): Set<string> {
@@ -330,7 +341,9 @@ function assignGenerations(graph: FamilyGraph): Map<string, number> {
       queue.push(spouseId);
     }
     for (const partnerId of laterPartnerIds(graph, current)) {
-      if (!generations.has(partnerId)) generations.set(partnerId, generation);
+      if (generations.has(partnerId)) continue;
+      generations.set(partnerId, generation);
+      queue.push(partnerId);
     }
     for (const parent of parentsOf.get(current) ?? []) {
       if (!generations.has(parent)) {
@@ -447,11 +460,25 @@ function laterPartnersOf(graph: FamilyGraph, personId: string): FamilyNode[] {
 
 type LaterPartnerSeat = { partner: FamilyNode; gap: number; side: 1 | -1; inside: boolean };
 
-/** Every later partner, the gap leading out to them and the side the husband-left rule puts them on. */
+function unitsSpan(units: SiblingUnit[]): number {
+  return units.reduce((sum, unit) => sum + unit.width, 0);
+}
+
+/** Room a later couple's children need under the stretch between the two partners, or 0 without children. */
+function laterCoupleChildrenSpan(graph: FamilyGraph, metrics: LayoutMetrics, person: FamilyNode, partner: FamilyNode): number {
+  const units = siblingUnits(graph, childrenOfCouple(graph, person.id, partner.id), metrics);
+  if (units.length === 0) return 0;
+  return Math.max(childrenCoupleGap(graph, person.id, partner.id, metrics), unitsSpan(units));
+}
+
+/**
+ * Every later partner, the gap leading out to them and the side the husband-left rule puts them on.
+ * The gap also holds that couple's whole child block, so each later family keeps its own stretch.
+ */
 function laterPartnerSeats(graph: FamilyGraph, metrics: LayoutMetrics, person: FamilyNode): LaterPartnerSeat[] {
   return laterPartnersOf(graph, person.id).map((partner) => ({
     partner,
-    gap: laterPartnerGap(metrics, person, partner),
+    gap: Math.max(laterPartnerGap(metrics, person, partner), laterCoupleChildrenSpan(graph, metrics, person, partner)),
     side: partnerSide(person, partner),
     inside: sitsInsideFirstCouple(graph, person, partner),
   }));
@@ -461,15 +488,25 @@ function totalGap(seats: LaterPartnerSeat[]): number {
   return seats.reduce((sum, seat) => sum + seat.gap, 0);
 }
 
+function insideSeatReach(graph: FamilyGraph, metrics: LayoutMetrics, personId: string): number {
+  const person = graph.nodes.find((node) => node.id === personId);
+  if (!person) return 0;
+  return totalGap(laterPartnerSeats(graph, metrics, person).filter((seat) => seat.inside));
+}
+
 /**
- * Room the first couple keeps between them for later partners seated inside it, so the
- * innermost one still stands a full couple gap away from the first spouse.
+ * Room the first couple keeps between them for later partners seated inside it. The innermost
+ * one still stands a full couple gap from the first spouse, and the first couple's children,
+ * centered under their line, stay clear of the stretch each inside later family takes.
  */
 function insideLaterPartnerSpan(graph: FamilyGraph, metrics: LayoutMetrics, leftId: string, rightId: string): number {
-  const reach = [leftId, rightId]
-    .flatMap((id) => graph.nodes.find((node) => node.id === id) ?? [])
-    .reduce((sum, person) => sum + totalGap(laterPartnerSeats(graph, metrics, person).filter((seat) => seat.inside)), 0);
-  return reach === 0 ? 0 : reach + MIN_COUPLE_GAP;
+  const reaches = [leftId, rightId].map((id) => insideSeatReach(graph, metrics, id));
+  const reach = reaches[0] + reaches[1];
+  if (reach === 0) return 0;
+  const besideFirstSpouse = reach + MIN_COUPLE_GAP;
+  const firstChildren = unitsSpan(siblingUnits(graph, childrenOfCouple(graph, leftId, rightId), metrics));
+  if (firstChildren === 0) return besideFirstSpouse;
+  return Math.max(besideFirstSpouse, firstChildren + 2 * Math.max(...reaches));
 }
 
 /** Later partners take room in their person's unit, so a sibling on that side moves over rather than onto them. */
@@ -530,7 +567,7 @@ function unitsWithoutLaterPartners(graph: FamilyGraph, children: FamilyNode[], m
     }
     const ownChildren = childrenOfParent(graph, child.id);
     if (ownChildren.length > 1) {
-      const span = siblingUnits(graph, ownChildren, metrics).reduce((sum, unit) => sum + unit.width, 0);
+      const span = unitsSpan(siblingUnits(graph, ownChildren, metrics));
       const width = Math.max(slot, span);
       return { child, width, childOffset: width / 2 };
     }
@@ -577,6 +614,24 @@ export function directLineIds(graph: FamilyGraph): Set<string> {
     if (edge.target !== index.id) continue;
     for (const sibling of childrenOfParent(graph, edge.source)) {
       ids.add(sibling.id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Later partners, everyone descending from them and those descendants' spouses: seated only
+ * after the rest of the family stops moving, so the room kept for them is final.
+ */
+function laterFamilyIds(graph: FamilyGraph): Set<string> {
+  const ids = new Set<string>();
+  for (const node of graph.nodes) {
+    if (!isLaterPartner(graph, node.id)) continue;
+    ids.add(node.id);
+    for (const id of descendantIds(graph, node.id)) {
+      ids.add(id);
+      const spouseId = findSpouseId(graph, id);
+      if (spouseId) ids.add(spouseId);
     }
   }
   return ids;
@@ -693,12 +748,16 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     layoutCoupleAt(unitLeft, unitRight, nested, positions.get(unitLeft.id)!.x, childY);
   };
 
+  let deferred = laterFamilyIds(graph);
+  const waitsForLaterFamily = (couple: { left: FamilyNode; right: FamilyNode }) =>
+    deferred.has(couple.left.id) || deferred.has(couple.right.id);
+
   const placeUnplacedChild = (
     unit: SiblingUnit,
     childX: number,
     childY: number,
   ) => {
-    if (positions.has(unit.child.id)) return;
+    if (positions.has(unit.child.id) || deferred.has(unit.child.id)) return;
     positions.set(unit.child.id, { x: childX, y: childY });
     layoutNestedMarriage(unit, childX, childY);
   };
@@ -712,7 +771,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     const children = units.map((unit) => unit.child);
     const firstPlaced = units.findIndex((unit) => positions.has(unit.child.id));
     if (firstPlaced === -1) {
-      const span = units.reduce((sum, unit) => sum + unit.width, 0);
+      const span = unitsSpan(units);
       const mid = (barLeftX + barRightX) / 2;
       let cursor = mid - span / 2;
       for (const unit of units) {
@@ -823,7 +882,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
   );
 
   for (const couple of layoutCouples) {
-    if (placedCouples.has(couple.edge.id)) continue;
+    if (placedCouples.has(couple.edge.id) || waitsForLaterFamily(couple)) continue;
     layoutCoupleAt(
       couple.left,
       couple.right,
@@ -839,19 +898,21 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
   const leftoverCouples = [...couplesForLayout(graph)].sort(
     (left, right) => (generations.get(left.left.id) ?? 0) - (generations.get(right.left.id) ?? 0),
   );
-  for (const couple of leftoverCouples) {
-    if (placedCouples.has(couple.edge.id)) continue;
-    layoutCoupleAt(
-      couple.left,
-      couple.right,
-      couple.edge,
-      originX,
-      CANVAS_PADDING_Y + (generations.get(couple.left.id) ?? 0) * GENERATION_GAP,
-    );
-    originX += MIN_COUPLE_GAP + NODE_SIZE * 2;
-  }
+  const layoutLeftoverCouples = () => {
+    for (const couple of leftoverCouples) {
+      if (placedCouples.has(couple.edge.id) || waitsForLaterFamily(couple)) continue;
+      layoutCoupleAt(
+        couple.left,
+        couple.right,
+        couple.edge,
+        originX,
+        CANVAS_PADDING_Y + (generations.get(couple.left.id) ?? 0) * GENERATION_GAP,
+      );
+      originX += MIN_COUPLE_GAP + NODE_SIZE * 2;
+    }
+  };
+  layoutLeftoverCouples();
 
-  const unplacedNodes = () => graph.nodes.filter((node) => !positions.has(node.id) && !isLaterPartner(graph, node.id));
   const parentKey = (node: FamilyNode) =>
     parentChildEdges(graph)
       .filter((edge) => edge.target === node.id)
@@ -859,51 +920,45 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
       .sort()
       .join("|");
 
-  // Children are placed before a lone parent, so the parent can sit on their
-  // vertical line instead of beside them with a bent connector.
-  for (let placementGuard = 0; unplacedNodes().length > 0; placementGuard += 1) {
-    if (placementGuard > graph.nodes.length) break;
-    const pending = unplacedNodes();
+  const unplacedNodes = () => graph.nodes.filter((node) => !positions.has(node.id) && !deferred.has(node.id));
+
+  const sitParentOverPlacedChildren = (pending: FamilyNode[]): boolean => {
     const readyParent = pending.find((parent) => {
       const children = childrenOfParent(graph, parent.id);
       return children.length > 0 && children.every((child) => positions.has(child.id));
     });
-    if (readyParent) {
-      const placedChildren = childrenOfParent(graph, readyParent.id).map((child) => ({
-        child,
-        point: positions.get(child.id)!,
-      }));
-      const row = placedChildren.map((item) => item.child);
-      const childYs = placedChildren.map((item) => item.point.y - childDropGap(item.child, row));
-      positions.set(readyParent.id, {
-        x: placedChildren.reduce((sum, item) => sum + item.point.x, 0) / placedChildren.length,
-        y: Math.min(...childYs),
-      });
-      continue;
-    }
+    if (!readyParent) return false;
+    const placedChildren = childrenOfParent(graph, readyParent.id).map((child) => ({
+      child,
+      point: positions.get(child.id)!,
+    }));
+    const row = placedChildren.map((item) => item.child);
+    const childYs = placedChildren.map((item) => item.point.y - childDropGap(item.child, row));
+    positions.set(readyParent.id, {
+      x: placedChildren.reduce((sum, item) => sum + item.point.x, 0) / placedChildren.length,
+      y: Math.min(...childYs),
+    });
+    return true;
+  };
 
+  const spreadSoloParentChildren = (): boolean => {
     const soloParent = graph.nodes.find((parent) => {
       if (!positions.has(parent.id) || findSpouseId(graph, parent.id)) return false;
-      return childrenOfParent(graph, parent.id).some((child) => !positions.has(child.id));
+      return childrenOfParent(graph, parent.id).some((child) => !positions.has(child.id) && !deferred.has(child.id));
     });
-    if (soloParent) {
-      const parentPoint = positions.get(soloParent.id)!;
-      const siblings = childrenOfParent(graph, soloParent.id);
-      const units = siblingUnits(graph, siblings, metrics);
-      let cursor = parentPoint.x - units.reduce((sum, unit) => sum + unit.width, 0) / 2;
-      for (const unit of units) {
-        if (!positions.has(unit.child.id)) {
-          placeUnplacedChild(
-            unit,
-            cursor + unit.childOffset,
-            childBaseline(parentPoint.y, unit.child, siblings),
-          );
-        }
-        cursor += unit.width;
-      }
-      continue;
+    if (!soloParent) return false;
+    const parentPoint = positions.get(soloParent.id)!;
+    const siblings = childrenOfParent(graph, soloParent.id);
+    const units = siblingUnits(graph, siblings, metrics);
+    let cursor = parentPoint.x - unitsSpan(units) / 2;
+    for (const unit of units) {
+      placeUnplacedChild(unit, cursor + unit.childOffset, childBaseline(parentPoint.y, unit.child, siblings));
+      cursor += unit.width;
     }
+    return true;
+  };
 
+  const lineUpDeepestSiblings = (pending: FamilyNode[]) => {
     const leaves = pending.filter((node) =>
       childrenOfParent(graph, node.id).every((child) => positions.has(child.id)),
     );
@@ -919,7 +974,19 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
       });
       originX += CHILD_SLOT_WIDTH;
     }
-  }
+  };
+
+  // Children are placed before a lone parent, so the parent can sit on their
+  // vertical line instead of beside them with a bent connector.
+  const placeRemaining = () => {
+    for (let placementGuard = 0; placementGuard <= graph.nodes.length; placementGuard += 1) {
+      const pending = unplacedNodes();
+      if (pending.length === 0) return;
+      if (sitParentOverPlacedChildren(pending) || spreadSoloParentChildren()) continue;
+      lineUpDeepestSiblings(pending);
+    }
+  };
+  placeRemaining();
 
   const shiftX = (personId: string, delta: number) => {
     if (delta === 0) return;
@@ -955,7 +1022,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     const siblings = childrenOfParent(graph, parent.id);
     if (siblings.length === 0) continue;
     const units = siblingUnits(graph, siblings, metrics);
-    const span = units.reduce((sum, unit) => sum + unit.width, 0);
+    const span = unitsSpan(units);
     let cursor = positions.get(parent.id)!.x - span / 2;
     for (const unit of units) {
       const current = positions.get(unit.child.id);
@@ -969,7 +1036,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     const children = childrenOfCouple(graph, bar.leftId, bar.rightId);
     if (children.length === 0) return;
     const units = siblingUnits(graph, children, metrics);
-    const span = units.reduce((sum, unit) => sum + unit.width, 0);
+    const span = unitsSpan(units);
     const mid = (bar.leftX + bar.rightX) / 2;
     let cursor = mid - span / 2;
     const visited = new Set([bar.leftId, bar.rightId]);
@@ -1036,22 +1103,42 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     if (!widened) break;
   }
 
-  // Seated last, once their person has stopped moving, beside them in the room their unit reserved.
-  for (const person of graph.nodes) {
+  /**
+   * Each later partner takes the next stretch out from their person, and that couple's
+   * children hang under the same stretch, so every later family keeps to its own room.
+   */
+  const seatLaterPartnersOf = (person: FamilyNode): boolean => {
     const personPoint = positions.get(person.id);
-    if (!personPoint) continue;
+    if (!personPoint) return false;
     const reachBySide = { [-1]: 0, [1]: 0 };
+    let seatedAny = false;
     for (const { partner, gap, side } of laterPartnerSeats(graph, metrics, person)) {
       const edge = coupleEdgeBetween(graph, person.id, partner.id);
       if (!edge) continue;
+      const innerX = personPoint.x + side * reachBySide[side];
       reachBySide[side] += gap;
+      if (placedCouples.has(edge.id)) continue;
       const x = personPoint.x + side * reachBySide[side];
       positions.set(partner.id, { x, y: personPoint.y });
       const [left, right] = side > 0 ? [person, partner] : [partner, person];
       const [leftX, rightX] = side > 0 ? [personPoint.x, x] : [x, personPoint.x];
       recordBar(edge, left, right, leftX, rightX, personPoint.y, true);
+      const children = childrenOfCouple(graph, person.id, partner.id);
+      placeChildren(siblingUnits(graph, children, metrics), personPoint.y, Math.min(innerX, x), Math.max(innerX, x));
+      seatedAny = true;
     }
+    return seatedAny;
+  };
+
+  // Seated last, once everyone else has stopped moving, so the room kept for them is final.
+  // A later family can hold its own remarriage, so seating repeats until nobody new is seated.
+  deferred = new Set();
+  for (let seatingGuard = 0; seatingGuard <= graph.nodes.length; seatingGuard += 1) {
+    const seatedAny = graph.nodes.reduce((seated, person) => seatLaterPartnersOf(person) || seated, false);
+    if (!seatedAny) break;
   }
+  layoutLeftoverCouples();
+  placeRemaining();
 
   const childDrops: ChildDrop[] = [];
   const linkedChildren = new Set<string>();
@@ -1065,7 +1152,6 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     )?.kind;
 
   for (const bar of coupleBars) {
-    if (bar.laterPartner) continue;
     const children = childrenOfCouple(graph, bar.leftId, bar.rightId);
     for (const child of children) {
       const point = positions.get(child.id);

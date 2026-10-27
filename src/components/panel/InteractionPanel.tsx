@@ -15,6 +15,7 @@ const NO_SELECTION = "";
 const MIN_PEOPLE_FOR_INTERACTION = 2;
 const NOT_ENOUGH_PEOPLE_MESSAGE = "인물정보 탭에서 인물을 두 명 이상 추가하면 상호작용을 표시할 수 있습니다.";
 const PICK_PLACEHOLDER = "선택";
+const DELETE_LINE_HINT = "잘못 그린 관계 역동 선은 편집화면의 가계도에서 선을 클릭하면 지울 수 있습니다.";
 
 type Outcome = { tone: "info" | "error"; text: string };
 
@@ -120,6 +121,7 @@ export function InteractionPanel() {
         확인
       </Button>
       {outcome ? <FormMessage tone={outcome.tone}>{outcome.text}</FormMessage> : null}
+      <p className="text-xs text-muted-foreground">{DELETE_LINE_HINT}</p>
     </form>
   );
 }

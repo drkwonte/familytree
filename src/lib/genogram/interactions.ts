@@ -1,6 +1,6 @@
 import { type InteractionAction, RELATION_KIND_LABELS, type RelationKind } from "./interaction-options";
-import { hasCurrentSpouse, makesCurrentSpouse } from "./partners";
-import { addHousehold, createEdgeId, isCoupleKind, personCode } from "./relations";
+import { hasCurrentSpouse } from "./partners";
+import { addHousehold, createEdgeId, isCoupleKind, makesCurrentSpouse, personCode } from "./relations";
 import { SPOUSE_ALREADY_EXISTS_MESSAGE } from "./validate";
 import { EMOTIONAL_KINDS, type FamilyEdge, type FamilyGraph, type FamilyNode, type Household, type StructuralKind } from "./types";
 
@@ -96,12 +96,38 @@ function leaveHousehold(graph: FamilyGraph, pair: Pair): InteractionResult {
 }
 
 function findPair(graph: FamilyGraph, interaction: Interaction): Pair | string {
-  const first = graph.nodes.find((node) => node.id === interaction.firstId);
-  const second = graph.nodes.find((node) => node.id === interaction.secondId);
+  const first = nodeById(graph, interaction.firstId);
+  const second = nodeById(graph, interaction.secondId);
   if (!first || !second) return MISSING_PERSON_MESSAGE;
   if (first.id === second.id) return SAME_PERSON_MESSAGE;
-  const name = `${personCode(first.data.displayNumber)}·${personCode(second.data.displayNumber)}`;
-  return { first, second, name };
+  return { first, second, name: pairName(first, second) };
+}
+
+function findEmotionalLine(graph: FamilyGraph, lineId: string): FamilyEdge | undefined {
+  return graph.edges.find((edge) => edge.id === lineId && edge.category === "emotional");
+}
+
+function pairName(first: FamilyNode, second: FamilyNode): string {
+  return `${personCode(first.data.displayNumber)}·${personCode(second.data.displayNumber)}`;
+}
+
+function nodeById(graph: FamilyGraph, personId: string): FamilyNode | undefined {
+  return graph.nodes.find((node) => node.id === personId);
+}
+
+/** Confirmation asked before a clicked relationship line is deleted; null when the id is not one. */
+export function emotionalLineDeletePrompt(graph: FamilyGraph, lineId: string): string | null {
+  const line = findEmotionalLine(graph, lineId);
+  const first = line && nodeById(graph, line.source);
+  const second = line && nodeById(graph, line.target);
+  if (!line || !first || !second) return null;
+  return `${pairName(first, second)} 사이의 ${RELATION_KIND_LABELS[line.kind]} 관계를 지울까요?`;
+}
+
+/** Family lines carry the structure, so only relationship lines can be deleted this way. */
+export function removeEmotionalLine(graph: FamilyGraph, lineId: string): FamilyGraph {
+  if (!findEmotionalLine(graph, lineId)) return graph;
+  return { ...graph, edges: graph.edges.filter((edge) => edge.id !== lineId) };
 }
 
 /** Applies one interaction, or explains why it cannot be drawn without touching the genogram. */

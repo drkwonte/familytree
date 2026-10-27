@@ -14,6 +14,7 @@ import { ClientSessionBar } from "@/components/workspace/ClientSessionBar";
 import { ExportActions } from "@/components/workspace/ExportActions";
 import { UnsavedChangesDialog } from "@/components/workspace/UnsavedChangesDialog";
 import { useUnsavedChangesGuard } from "@/components/workspace/use-unsaved-changes";
+import { emotionalLineDeletePrompt } from "@/lib/genogram/interactions";
 import type { ViewMode } from "@/lib/genogram/types";
 import { useFamilyStore } from "@/store/family-store";
 
@@ -64,6 +65,7 @@ export function Studio() {
   const viewMode = useFamilyStore((state) => state.viewMode);
   const selectPerson = useFamilyStore((state) => state.selectPerson);
   const reset = useFamilyStore((state) => state.reset);
+  const deleteRelationLine = useFamilyStore((state) => state.deleteRelationLine);
   const undo = useFamilyStore((state) => state.undo);
   const redo = useFamilyStore((state) => state.redo);
   const canUndo = useFamilyStore((state) => state.past.length > 0);
@@ -80,6 +82,11 @@ export function Studio() {
   function openPersonEditor(personId: string) {
     selectPerson(personId);
     setSidebarPanel(SIDEBAR_FORM);
+  }
+
+  function confirmRelationLineDelete(lineId: string) {
+    const prompt = emotionalLineDeletePrompt(graph, lineId);
+    if (prompt && window.confirm(prompt)) deleteRelationLine(lineId);
   }
 
   useEffect(() => {
@@ -166,7 +173,12 @@ export function Studio() {
         </aside>
         <main className="flex min-h-0 flex-col overflow-hidden bg-[var(--genogram-paper)]">
           <div className="relative min-h-0 flex-1 overflow-hidden">
-            <GenogramCanvas graph={graph} viewMode={viewMode} onSelectPerson={openPersonEditor} />
+            <GenogramCanvas
+              graph={graph}
+              viewMode={viewMode}
+              onSelectPerson={openPersonEditor}
+              onSelectRelationLine={confirmRelationLineDelete}
+            />
             <div className="absolute bottom-3 left-3">
               <CollateralScalePicker graph={graph} />
             </div>

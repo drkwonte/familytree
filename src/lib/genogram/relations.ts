@@ -156,21 +156,25 @@ function addCoParentsMarriage(
   return addEdge(graph, newParentId, others[0], "marriage");
 }
 
-function findSpouse(graph: FamilyGraph, personId: string): string | undefined {
-  const coupleKinds = new Set([
-    "marriage",
-    "separation",
-    "divorce",
-    "remarriage",
-    "cohabitation",
-    "sameSexUnion",
-  ]);
-  const edge = graph.edges.find(
+/** Couple lines a new child of this person can belong to; an affair partner is never assumed. */
+const CO_PARENT_KINDS: ReadonlySet<string> = new Set([
+  "marriage",
+  "separation",
+  "divorce",
+  "remarriage",
+  "cohabitation",
+  "sameSexUnion",
+]);
+
+/** The partner a newly added child shares: the current spouse first, so a remarried parent's child is not given to the ex. */
+function findCoParent(graph: FamilyGraph, personId: string): string | undefined {
+  const edges = graph.edges.filter(
     (item) =>
       item.category === "structural" &&
-      coupleKinds.has(item.kind) &&
+      CO_PARENT_KINDS.has(item.kind) &&
       (item.source === personId || item.target === personId),
   );
+  const edge = edges.find((item) => makesCurrentSpouse(item.kind)) ?? edges[0];
   if (!edge) return undefined;
   return edge.source === personId ? edge.target : edge.source;
 }
@@ -224,7 +228,7 @@ export function addRelative(
   }
   switch (params.relation) {
     case "spouse":
-      return addEdge(next, anchor, nextNode.id, findSpouse(graph, anchor) ? "remarriage" : "marriage");
+      return addEdge(next, anchor, nextNode.id, findCoParent(graph, anchor) ? "remarriage" : "marriage");
     case "father":
     case "mother": {
       const withParent = addEdge(next, nextNode.id, anchor, "parent");
@@ -242,7 +246,7 @@ export function addRelative(
             ? "foster"
             : "parent";
       let withChild = addEdge(next, anchor, nextNode.id, kind);
-      const spouseId = findSpouse(withChild, anchor);
+      const spouseId = findCoParent(withChild, anchor);
       if (spouseId) {
         withChild = addEdge(withChild, spouseId, nextNode.id, kind);
       }
@@ -450,4 +454,11 @@ export function isCoupleKind(kind: string): boolean {
     "sameSexUnion",
     "spouse",
   ].includes(kind);
+}
+
+/** Couple lines that leave a person free to marry again: an ended marriage, or a partner who never was a spouse. */
+const NOT_A_CURRENT_SPOUSE_KINDS: ReadonlySet<string> = new Set(["divorce", "affair"]);
+
+export function makesCurrentSpouse(kind: string): boolean {
+  return isCoupleKind(kind) && !NOT_A_CURRENT_SPOUSE_KINDS.has(kind);
 }

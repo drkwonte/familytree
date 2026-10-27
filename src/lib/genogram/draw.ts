@@ -23,6 +23,7 @@ import {
   INDEX_RING_GAP,
   LABEL_LINE_HEIGHT,
   LATER_PARTNER_NECK,
+  RELATION_HIT_WIDTH,
   NOTE_GAP_BELOW,
   NODE_HALF,
   PERSON_CODE_COLOR,
@@ -386,6 +387,21 @@ function drawEmotion(link: EmotionalLink, target: ArrowTarget | null): string {
   return `<path d="${emotionArc(x1, y1, x2, y2)}" fill="none" ${paint} stroke-width="1.8"/>`;
 }
 
+/** Relationship kinds drawn along the straight chord; every other kind bows into an arc. */
+const STRAIGHT_EMOTION_KINDS: ReadonlySet<string> = new Set(["conflict", "fusedConflict", "cutoff"]);
+
+/**
+ * A relationship line is only a couple of pixels wide, so editing puts a wide invisible
+ * stroke along its center for the click to land on.
+ */
+function clickableEmotion(link: EmotionalLink, line: string): string {
+  const { x: x1, y: y1 } = link.source;
+  const { x: x2, y: y2 } = link.target;
+  const center = STRAIGHT_EMOTION_KINDS.has(String(link.kind)) ? `M ${x1} ${y1} L ${x2} ${y2}` : emotionArc(x1, y1, x2, y2);
+  const hitTarget = `<path d="${center}" fill="none" stroke="transparent" stroke-width="${RELATION_HIT_WIDTH}" pointer-events="stroke"/>`;
+  return `<g data-relation-id="${link.id}" style="cursor:pointer">${line}${hitTarget}</g>`;
+}
+
 function personScale(directLine: Set<string>, personId: string, collateralScale: number): number {
   return directLine.has(personId) ? 1 : collateralScale;
 }
@@ -417,7 +433,8 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
     const arrowTarget = target
       ? { data: target.data, scale: personScale(directLine, target.id, layout.collateralScale) }
       : null;
-    layers.push(drawEmotion(link, arrowTarget));
+    const line = drawEmotion(link, arrowTarget);
+    layers.push(viewMode === "edit" ? clickableEmotion(link, line) : line);
   }
 
   for (const box of layout.householdBoxes) {
@@ -445,7 +462,6 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
   for (const drop of layout.childDrops) {
     const sourceBar = layout.coupleBars.find(
       (bar) =>
-        !bar.laterPartner &&
         Math.abs(bar.barY - drop.fromY) < 0.01 &&
         drop.x + 0.01 >= Math.min(bar.leftX, bar.rightX) &&
         drop.x - 0.01 <= Math.max(bar.leftX, bar.rightX),

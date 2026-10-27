@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Interaction, type InteractionResult, applyInteraction } from "./interactions";
+import { renderFamilyGraphSvg } from "./draw";
+import {
+  type Interaction,
+  type InteractionResult,
+  applyInteraction,
+  emotionalLineDeletePrompt,
+  removeEmotionalLine,
+} from "./interactions";
 import { addRelative } from "./relations";
 import { EMPTY_GRAPH, type FamilyGraph } from "./types";
 
@@ -26,6 +33,39 @@ function drawn(result: InteractionResult): FamilyGraph {
   assert.ok(result.ok, result.message);
   return result.graph;
 }
+
+function withConflict(): { graph: FamilyGraph; lineId: string } {
+  const base = family();
+  const graph = drawn(applyInteraction(base, between(base, 2, 3, { type: "setRelation", kind: "conflict" })));
+  return { graph, lineId: emotionalEdges(graph)[0].id };
+}
+
+test("a clicked relationship line is named for the deletion prompt", () => {
+  const { graph, lineId } = withConflict();
+  assert.equal(emotionalLineDeletePrompt(graph, lineId), "인물2·인물3 사이의 갈등 관계를 지울까요?");
+});
+
+test("only relationship lines can be deleted by clicking, not family lines or missing ones", () => {
+  const { graph } = withConflict();
+  const coupleLine = graph.edges.find((edge) => edge.category === "structural")!;
+  assert.equal(emotionalLineDeletePrompt(graph, coupleLine.id), null);
+  assert.equal(emotionalLineDeletePrompt(graph, "missing"), null);
+  assert.equal(removeEmotionalLine(graph, coupleLine.id), graph);
+});
+
+test("deleting a relationship line removes only that line", () => {
+  const { graph: conflicted, lineId } = withConflict();
+  const graph = drawn(applyInteraction(conflicted, between(conflicted, 1, 4, { type: "setRelation", kind: "close" })));
+  const remaining = removeEmotionalLine(graph, lineId);
+  assert.deepEqual(emotionalEdges(remaining).map((edge) => edge.kind), ["close"]);
+  assert.equal(remaining.edges.length, graph.edges.length - 1);
+});
+
+test("relationship lines are clickable while editing, and the final drawing has no click targets", () => {
+  const { graph, lineId } = withConflict();
+  assert.match(renderFamilyGraphSvg(graph, "edit"), new RegExp(`data-relation-id="${lineId}"`));
+  assert.doesNotMatch(renderFamilyGraphSvg(graph, "final"), /data-relation-id/);
+});
 
 test("an emotional relation is drawn from the first person to the second", () => {
   const graph = family();

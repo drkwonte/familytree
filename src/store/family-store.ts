@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { addRelative, deletePerson, ensureDisplayNumbers, updatePerson } from "@/lib/genogram/relations";
+import { removeEmotionalLine } from "@/lib/genogram/interactions";
 import { pushGraphHistory, redoGraphChange, snapshotGraph, undoGraphChange } from "@/lib/genogram/history";
 import {
   type CollateralScale,
@@ -38,6 +39,7 @@ type FamilyStore = {
   addPerson: (input: AddPersonInput) => void;
   updatePerson: (personId: string, patch: Partial<PersonData>) => void;
   deletePerson: (personId: string) => void;
+  deleteRelationLine: (lineId: string) => void;
   replaceGraph: (graph: FamilyGraph) => void;
   /** Opens a saved genogram; undo history belongs to the previous client, so it starts fresh. */
   loadGraph: (graph: FamilyGraph) => void;
@@ -94,6 +96,12 @@ export const useFamilyStore = create<FamilyStore>((set) => ({
         graph,
         selectedPersonId: keepSelection(state.selectedPersonId, graph),
       };
+    }),
+  deleteRelationLine: (lineId) =>
+    set((state) => {
+      const graph = removeEmotionalLine(state.graph, lineId);
+      if (graph === state.graph) return state;
+      return { past: pushGraphHistory(state.past, state.graph), future: [], graph };
     }),
   replaceGraph: (graph) =>
     set((state) => ({

@@ -41,8 +41,11 @@ export const CHILD_SLOT_WIDTH = NODE_SIZE + SIBLING_CLEARANCE;
  * between siblings, so the remarriage still reads as a couple and not as a sibling.
  */
 export const LATER_PARTNER_CLEARANCE = SIBLING_CLEARANCE;
-/** A later partner's couple line drops half a neck, so it runs above the first couple's line instead of on it. */
-export const LATER_PARTNER_NECK = DROP_LENGTH / 2;
+/**
+ * A later partner's couple line hangs a neck lower than the first couple's line, so the
+ * lines down to the later couple's children start below it and never cross it.
+ */
+export const LATER_PARTNER_NECK = DROP_LENGTH * 2;
 export const CHILD_DROP_INSET = 28;
 export const MIN_COUPLE_GAP = 80;
 /**
@@ -97,6 +100,8 @@ export const EMOTION_ARROW_HALF_WIDTH = 5;
 /** Air between an arrow tip and the outline it points at, so the outline stroke never hides the tip. */
 export const EMOTION_ARROW_CLEARANCE = STRUCTURE_WIDTH + 2;
 export const EMOTION_STROKE_OPACITY = 0.68;
+/** Width of the invisible stroke a relationship line is clicked by while editing. */
+export const RELATION_HIT_WIDTH = 14;
 export const CLOSE_LINE_OFFSET = 2.5;
 export const FUSED_LINE_OFFSET = 3;
 export const COUPLE_YEAR_EVENT_LABELS: Record<string, string> = {

@@ -13,9 +13,15 @@ type GenogramCanvasProps = {
   graph: FamilyGraph;
   viewMode: ViewMode;
   onSelectPerson: (personId: string) => void;
+  onSelectRelationLine: (lineId: string) => void;
 };
 
-export function GenogramCanvas({ graph, viewMode, onSelectPerson }: GenogramCanvasProps) {
+function clickedElement(target: EventTarget | null): Element | null {
+  if (target instanceof Element) return target;
+  return target instanceof Node ? target.parentElement : null;
+}
+
+export function GenogramCanvas({ graph, viewMode, onSelectPerson, onSelectRelationLine }: GenogramCanvasProps) {
   const [zoom, setZoom] = useState(CANVAS_ZOOM_DEFAULT);
   const scrollerRef = useRef<HTMLDivElement>(null);
 
@@ -77,14 +83,14 @@ export function GenogramCanvas({ graph, viewMode, onSelectPerson }: GenogramCanv
             className="shrink-0 [&_svg]:block [&_svg]:h-full [&_svg]:w-full"
             style={{ width: scaledWidth, height: scaledHeight }}
             onClick={(event) => {
-              const node =
-                event.target instanceof Element
-                  ? event.target
-                  : event.target instanceof Node
-                    ? event.target.parentElement
-                    : null;
-              const personId = node?.closest("[data-person-id]")?.getAttribute("data-person-id");
-              if (personId) onSelectPerson(personId);
+              const element = clickedElement(event.target);
+              const personId = element?.closest("[data-person-id]")?.getAttribute("data-person-id");
+              if (personId) {
+                onSelectPerson(personId);
+                return;
+              }
+              const lineId = element?.closest("[data-relation-id]")?.getAttribute("data-relation-id");
+              if (lineId) onSelectRelationLine(lineId);
             }}
           >
             <div
