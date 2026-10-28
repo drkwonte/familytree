@@ -129,7 +129,7 @@ test("the first marriage still holds the children and the later one is its own c
   assert.equal(laterBar.leftX, point(layout, partnerId).x);
   assert.equal(laterBar.rightX, mother.x);
   assert.equal(laterBar.kind, "remarriage");
-  assert.ok(laterBar.barY > firstBar.barY, "the remarriage line runs below the first couple's line, not on it");
+  assert.ok(firstBar.barY > laterBar.barY, "the first couple's line drops below the remarriage line, not onto it");
 });
 
 function parentIdsOf(graph: FamilyGraph, childId: string): string[] {
@@ -146,6 +146,36 @@ function assertDrawnApart(graph: FamilyGraph, layout: FamilyLayout) {
   assertChildrenStayOnTheirCoupleBar(graph, layout);
   assertNoDropCrossesForeignGlyph(graph, layout);
   assertCollateralDoesNotCoverDirect(graph, layout);
+}
+
+/**
+ * The first couple's line is stretched down into a bracket around the later family:
+ * the later partner's children are drawn small inside it, above that line, and the
+ * first marriage's children hang below it.
+ */
+function assertLaterFamilyInsideFirstCouple(
+  graph: FamilyGraph,
+  layout: FamilyLayout,
+  firstPair: [string, string],
+  laterChildIds: string[],
+) {
+  const firstBar = layout.coupleBars.find(
+    (bar) => !bar.laterPartner && firstPair.includes(bar.leftId) && firstPair.includes(bar.rightId),
+  )!;
+  const direct = directLineIds(graph);
+  for (const childId of laterChildIds) {
+    const child = point(layout, childId);
+    assert.equal(direct.has(childId), false, `인물${child.data.displayNumber} is drawn at the smaller size`);
+    assert.ok(child.y + drawnHalf(layout, graph, childId) < firstBar.barY, "and sits above the first couple's line");
+    assert.ok(child.x > firstBar.leftX && child.x < firstBar.rightX, "inside the first couple's bracket");
+  }
+  const firstChildren = layout.nodes.filter((node) =>
+    parentIdsOf(graph, node.id).every((parentId) => firstPair.includes(parentId)) && parentIdsOf(graph, node.id).length > 0,
+  );
+  assert.ok(firstChildren.length > 0);
+  for (const child of firstChildren) {
+    assert.ok(child.y - drawnHalf(layout, graph, child.id) > firstBar.barY, "the first children hang below that line");
+  }
 }
 
 /** Mother has the client and a brother from her first marriage, then two children with her new husband. */
@@ -171,18 +201,15 @@ test("a child added to a remarried mother belongs to her current husband, not th
   }
 });
 
-test("the remarried mother's children hang from the remarriage line, clear of the first marriage's children", () => {
-  const { graph, partnerId, firstChildIds, laterChildIds } = motherRemarriedWithChildren();
+test("the remarried mother's children hang small from the remarriage line, inside the stretched first couple", () => {
+  const { graph, partnerId, laterChildIds } = motherRemarriedWithChildren();
   const layout = layoutFamily(graph);
   const laterBar = layout.coupleBars.find((bar) => bar.leftId === partnerId)!;
   for (const childId of laterChildIds) {
     const child = point(layout, childId);
-    assert.equal(child.y, point(layout, idOf(graph, CLIENT)).y, "half-siblings share the client's row");
-    assert.ok(child.x > laterBar.leftX && child.x < laterBar.rightX, "and hang between the mother and her new husband");
+    assert.ok(child.x > laterBar.leftX && child.x < laterBar.rightX, "between the mother and her new husband");
   }
-  const firstEdge = Math.max(...firstChildIds.map((id) => point(layout, id).x));
-  const laterEdge = Math.min(...laterChildIds.map((id) => point(layout, id).x));
-  assert.ok(firstEdge < laterEdge, "the first marriage's children stay on the father's side");
+  assertLaterFamilyInsideFirstCouple(graph, layout, [idOf(graph, FATHER), idOf(graph, MOTHER)], laterChildIds);
   assertDrawnApart(graph, layout);
 });
 
@@ -196,10 +223,12 @@ test("a remarried father's children with his new wife sit on his side without to
   const layout = layoutFamily(graph);
   const laterChildren = layout.nodes.filter((node) => parentIdsOf(graph, node.id).includes(remarried.partnerId));
   assert.equal(laterChildren.length, 3);
-  const firstChildren = layout.nodes.filter(
-    (node) => parentIdsOf(graph, node.id).includes(idOf(graph, MOTHER)),
+  assertLaterFamilyInsideFirstCouple(
+    graph,
+    layout,
+    [idOf(graph, FATHER), idOf(graph, MOTHER)],
+    laterChildren.map((node) => node.id),
   );
-  assert.ok(Math.max(...laterChildren.map((node) => node.x)) < Math.min(...firstChildren.map((node) => node.x)));
   assertDrawnApart(graph, layout);
 });
 
@@ -215,7 +244,31 @@ test("a remarried client's children from both marriages are drawn apart under th
   graph = withChild(graph, idOf(graph, CLIENT)).graph;
   const laterChildren = graph.nodes.filter((node) => parentIdsOf(graph, node.id).includes(laterHusbandId));
   assert.equal(laterChildren.length, 2);
-  assertDrawnApart(graph, layoutFamily(graph));
+  const layout = layoutFamily(graph);
+  assertLaterFamilyInsideFirstCouple(
+    graph,
+    layout,
+    [idOf(graph, CLIENT), idOf(graph, FATHER)],
+    laterChildren.map((node) => node.id),
+  );
+  assertDrawnApart(graph, layout);
+});
+
+test("the user's case: an ex and the ex's child added after the current family nest inside the first couple", () => {
+  let graph = threeGenerations();
+  graph = addRelative(graph, { name: "", gender: "F", relation: "sibling", anchorId: idOf(graph, CLIENT) });
+  graph = addRelative(graph, {
+    name: "",
+    gender: "M",
+    relation: "spouse",
+    anchorId: idOf(graph, MOTHER),
+    spouseHistory: "divorcedEx",
+  });
+  const exId = graph.nodes[graph.nodes.length - 1].id;
+  const { graph: withExChild, childId } = withChild(graph, exId);
+  const layout = layoutFamily(withExChild);
+  assertLaterFamilyInsideFirstCouple(withExChild, layout, [idOf(graph, FATHER), idOf(graph, MOTHER)], [childId]);
+  assertDrawnApart(withExChild, layout);
 });
 
 test("both parents remarried with children keep all three families apart", () => {

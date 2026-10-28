@@ -22,7 +22,6 @@ import {
   HOUSEHOLD_DASH,
   INDEX_RING_GAP,
   LABEL_LINE_HEIGHT,
-  LATER_PARTNER_NECK,
   RELATION_HIT_WIDTH,
   NOTE_GAP_BELOW,
   NODE_HALF,
@@ -416,8 +415,7 @@ function drawnCoupleBarY(directLine: Set<string>, bar: CoupleBar, collateralScal
     personScale(directLine, bar.leftId, collateralScale),
     personScale(directLine, bar.rightId, collateralScale),
   );
-  const neck = bar.laterPartner ? LATER_PARTNER_NECK : DROP_LENGTH * scale;
-  return bar.leftCenterY + NODE_HALF * glyph + neck;
+  return bar.leftCenterY + NODE_HALF * glyph + DROP_LENGTH * scale + (bar.neckExtension ?? 0);
 }
 
 export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "edit"): string {
@@ -460,12 +458,7 @@ export function renderFamilyGraphSvg(graph: FamilyGraph, viewMode: ViewMode = "e
   }
 
   for (const drop of layout.childDrops) {
-    const sourceBar = layout.coupleBars.find(
-      (bar) =>
-        Math.abs(bar.barY - drop.fromY) < 0.01 &&
-        drop.x + 0.01 >= Math.min(bar.leftX, bar.rightX) &&
-        drop.x - 0.01 <= Math.max(bar.leftX, bar.rightX),
-    );
+    const sourceBar = drop.barId ? layout.coupleBars.find((bar) => bar.id === drop.barId) : undefined;
     let painted = drop;
     if (sourceBar) {
       painted = { ...drop, fromY: drawnCoupleBarY(directLine, sourceBar, layout.collateralScale) };

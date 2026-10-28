@@ -42,10 +42,10 @@ export const CHILD_SLOT_WIDTH = NODE_SIZE + SIBLING_CLEARANCE;
  */
 export const LATER_PARTNER_CLEARANCE = SIBLING_CLEARANCE;
 /**
- * A later partner's couple line hangs a neck lower than the first couple's line, so the
- * lines down to the later couple's children start below it and never cross it.
+ * Air between a later partner's couple line and the first couple's line, which is
+ * stretched down below it so the two lines never run on top of each other.
  */
-export const LATER_PARTNER_NECK = DROP_LENGTH * 2;
+export const FIRST_COUPLE_BELOW_LATER_LINE = DROP_LENGTH;
 export const CHILD_DROP_INSET = 28;
 export const MIN_COUPLE_GAP = 80;
 /**
@@ -76,6 +76,8 @@ export const AGE_BASELINE_OFFSET = 4;
 export const YEAR_GAP_ABOVE = 12;
 export const YEAR_LABEL_BOX_HEIGHT = 16;
 export const NOTE_GAP_BELOW = 18;
+/** Room under a later family's lowest glyph for its person code, before the first couple's line runs past. */
+export const LATER_FAMILY_LABEL_CLEARANCE = NOTE_GAP_BELOW + LABEL_LINE_HEIGHT;
 export const TEXT_BACKDROP_OPACITY = 0.68;
 export const SHAPE_OUTLINE_CLEARANCE = 4;
 export const STRUCTURE_COLOR = "#1c1917";

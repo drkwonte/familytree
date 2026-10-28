@@ -19,8 +19,9 @@ import {
   DROP_LENGTH,
   GENERATION_GAP,
   LABEL_LINE_HEIGHT,
+  FIRST_COUPLE_BELOW_LATER_LINE,
+  LATER_FAMILY_LABEL_CLEARANCE,
   LATER_PARTNER_CLEARANCE,
-  LATER_PARTNER_NECK,
   MIN_COUPLE_GAP,
   NODE_HALF,
   NODE_SIZE,
@@ -56,12 +57,16 @@ export type CoupleBar = {
   barY: number;
   leftCenterY: number;
   rightCenterY: number;
-  /** Joins a person to a partner after the main spouse; no children hang from it. */
+  /** Joins a person to a partner after the main spouse. */
   laterPartner?: boolean;
+  /** How much further than the usual neck the line hangs, to wrap around a later family seated inside it. */
+  neckExtension?: number;
 };
 
 export type ChildDrop = {
   id: string;
+  /** The couple line this child hangs from; absent for a line from a lone parent. */
+  barId?: string;
   x: number;
   fromY: number;
   toY: number;
@@ -495,18 +500,31 @@ function insideSeatReach(graph: FamilyGraph, metrics: LayoutMetrics, personId: s
 }
 
 /**
- * Room the first couple keeps between them for later partners seated inside it. The innermost
- * one still stands a full couple gap from the first spouse, and the first couple's children,
- * centered under their line, stay clear of the stretch each inside later family takes.
+ * Room the first couple keeps between them for later partners seated inside it, so the
+ * innermost one still stands a full couple gap from the first spouse. The first couple's
+ * children hang below the later families, so they need no room beside them.
  */
 function insideLaterPartnerSpan(graph: FamilyGraph, metrics: LayoutMetrics, leftId: string, rightId: string): number {
-  const reaches = [leftId, rightId].map((id) => insideSeatReach(graph, metrics, id));
-  const reach = reaches[0] + reaches[1];
-  if (reach === 0) return 0;
-  const besideFirstSpouse = reach + MIN_COUPLE_GAP;
-  const firstChildren = unitsSpan(siblingUnits(graph, childrenOfCouple(graph, leftId, rightId), metrics));
-  if (firstChildren === 0) return besideFirstSpouse;
-  return Math.max(besideFirstSpouse, firstChildren + 2 * Math.max(...reaches));
+  const reach = insideSeatReach(graph, metrics, leftId) + insideSeatReach(graph, metrics, rightId);
+  return reach === 0 ? 0 : reach + MIN_COUPLE_GAP;
+}
+
+/** How far below the couple's row their line is drawn before any extension, at the size each partner is drawn. */
+function drawnUsualNeck(metrics: LayoutMetrics, leftId: string, rightId: string): number {
+  const glyphScale = (id: string) => (metrics.direct.has(id) ? 1 : metrics.scale);
+  const lineScale = metrics.direct.has(leftId) && metrics.direct.has(rightId) ? 1 : metrics.scale;
+  return NODE_HALF * Math.max(glyphScale(leftId), glyphScale(rightId)) + DROP_LENGTH * lineScale;
+}
+
+/** Later partners seated inside this couple, each with the person they are a later partner of. */
+function insideLaterCouples(graph: FamilyGraph, metrics: LayoutMetrics, leftId: string, rightId: string) {
+  return [leftId, rightId].flatMap((id) => {
+    const person = graph.nodes.find((node) => node.id === id);
+    if (!person) return [];
+    return laterPartnerSeats(graph, metrics, person)
+      .filter((seat) => seat.inside)
+      .map((seat) => ({ person, partner: seat.partner }));
+  });
 }
 
 /** Later partners take room in their person's unit, so a sibling on that side moves over rather than onto them. */
@@ -603,20 +621,27 @@ export function directLineIds(graph: FamilyGraph): Set<string> {
     if (seenDown.has(current)) continue;
     seenDown.add(current);
     for (const child of childrenOfParent(graph, current)) {
+      if (bornToLaterPartner(graph, child.id)) continue;
       ids.add(child.id);
       descendants.push(child.id);
     }
   }
 
   // The client's own brothers and sisters share the direct line: same size and
-  // the same generation drop. Aunts, uncles, and cousins stay off it.
+  // the same generation drop. Aunts, uncles, and cousins stay off it, and so do
+  // half-siblings from a parent's later partner, who are drawn small inside that couple.
   for (const edge of parentChildEdges(graph)) {
     if (edge.target !== index.id) continue;
     for (const sibling of childrenOfParent(graph, edge.source)) {
-      ids.add(sibling.id);
+      if (sibling.id === index.id || !bornToLaterPartner(graph, sibling.id)) ids.add(sibling.id);
     }
   }
   return ids;
+}
+
+/** A child of a later partner belongs to that later family, drawn small, not to the first couple's line. */
+function bornToLaterPartner(graph: FamilyGraph, childId: string): boolean {
+  return parentIdsOf(graph, childId).some((parentId) => isLaterPartner(graph, parentId));
 }
 
 /**
@@ -683,6 +708,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     y: number,
     laterPartner = false,
   ) => {
+    const extension = laterPartner ? 0 : neckExtension(left.id, right.id);
     const nextBar: CoupleBar = {
       id: edge.id,
       kind: edge.kind,
@@ -691,10 +717,11 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
       rightId: right.id,
       leftX,
       rightX,
-      barY: y + NODE_HALF + (laterPartner ? LATER_PARTNER_NECK : DROP_LENGTH),
+      barY: y + NODE_HALF + DROP_LENGTH + extension,
       leftCenterY: y,
       rightCenterY: y,
       ...(laterPartner ? { laterPartner } : {}),
+      ...(extension > 0 ? { neckExtension: extension } : {}),
     };
     const existing = coupleBars.find((bar) => bar.id === edge.id);
     if (existing) {
@@ -729,8 +756,38 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     return COLLATERAL_SIBLING_GAP;
   };
 
-  const childBaseline = (coupleY: number, child: FamilyNode, row: FamilyNode[]) =>
-    coupleY + childDropGap(child, row);
+  const childBaseline = (coupleY: number, child: FamilyNode, row: FamilyNode[], extraDrop = 0) =>
+    coupleY + childDropGap(child, row) + extraDrop;
+
+  /** Distance from a person's row down to the bottom of the lowest glyph among their descendants. */
+  const descendantsReach = (person: FamilyNode, offset: number): number => {
+    const children = childrenOfParent(graph, person.id);
+    return Math.max(
+      offset + glyphHalf(metrics, person),
+      ...children.map((child) => descendantsReach(child, offset + childDropGap(child, children))),
+    );
+  };
+
+  /** Distance from the later couple's row down to the bottom of their lowest descendant, or 0 without children. */
+  const laterFamilyReach = (person: FamilyNode, partner: FamilyNode): number => {
+    const children = childrenOfCouple(graph, person.id, partner.id);
+    return Math.max(0, ...children.map((child) => descendantsReach(child, childDropGap(child, children))));
+  };
+
+  /**
+   * A couple with later partners seated inside it stretches its line down past them and
+   * their whole family, so the later families sit within it and its own children hang below.
+   */
+  const neckExtension = (leftId: string, rightId: string): number => {
+    const insideCouples = insideLaterCouples(graph, metrics, leftId, rightId);
+    if (insideCouples.length === 0) return 0;
+    const usualNeck = drawnUsualNeck(metrics, leftId, rightId);
+    const belowFamilies = insideCouples.map(({ person, partner }) => {
+      const reach = laterFamilyReach(person, partner);
+      return reach === 0 ? 0 : reach + LATER_FAMILY_LABEL_CLEARANCE - usualNeck;
+    });
+    return Math.max(FIRST_COUPLE_BELOW_LATER_LINE, ...belowFamilies);
+  };
 
   const layoutNestedMarriage = (unit: SiblingUnit, childX: number, childY: number) => {
     if (!unit.spouse) return;
@@ -767,8 +824,10 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     coupleY: number,
     barLeftX: number,
     barRightX: number,
+    extraDrop = 0,
   ) => {
     const children = units.map((unit) => unit.child);
+    const baseline = (child: FamilyNode) => childBaseline(coupleY, child, children, extraDrop);
     const firstPlaced = units.findIndex((unit) => positions.has(unit.child.id));
     if (firstPlaced === -1) {
       const span = unitsSpan(units);
@@ -778,7 +837,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
         placeUnplacedChild(
           unit,
           cursor + unit.childOffset,
-          childBaseline(coupleY, unit.child, children),
+          baseline(unit.child),
         );
         cursor += unit.width;
       }
@@ -800,7 +859,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
       placeUnplacedChild(
         unit,
         rightEdge + unit.childOffset,
-        childBaseline(coupleY, unit.child, children),
+        baseline(unit.child),
       );
       rightEdge += unit.width;
     }
@@ -816,7 +875,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
       placeUnplacedChild(
         unit,
         leftEdge + unit.childOffset,
-        childBaseline(coupleY, unit.child, children),
+        baseline(unit.child),
       );
     }
   };
@@ -872,7 +931,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
     positions.set(left.id, { x: resolvedLeftX, y: coupleY });
     positions.set(right.id, { x: resolvedRightX, y: coupleY });
     recordBar(edge, left, right, resolvedLeftX, resolvedRightX, coupleY);
-    placeChildren(units, coupleY, resolvedLeftX, resolvedRightX);
+    placeChildren(units, coupleY, resolvedLeftX, resolvedRightX, neckExtension(left.id, right.id));
     if (!pinPartners) sitCoupleOnOwnChildren(left, right, edge, coupleY, children);
   };
 
@@ -1159,6 +1218,7 @@ function layoutAtScale(graph: FamilyGraph, scale: number): FamilyLayout {
       const kind = parentKindOf(child.id);
       childDrops.push({
         id: `${bar.id}-${child.id}`,
+        barId: bar.id,
         x: point.x,
         fromY: bar.barY,
         toY: point.y,
