@@ -11,6 +11,7 @@ import {
   type Gender,
   type PersonData,
   type RelativeRelation,
+  type SpouseHistory,
   type ViewMode,
   type VitalStatus,
 } from "@/lib/genogram/types";
@@ -27,6 +28,7 @@ type AddPersonInput = {
   isIndexPerson: boolean;
   anchorId?: string;
   relation: RelativeRelation;
+  spouseHistory?: SpouseHistory;
 };
 
 type FamilyStore = {

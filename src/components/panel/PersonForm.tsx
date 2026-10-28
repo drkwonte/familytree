@@ -6,13 +6,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { NATIVE_SELECT_CLASS_NAME } from "@/components/forms/select-class";
-import { hasCurrentSpouse } from "@/lib/genogram/partners";
 import { personCode, personHasParent, personOptionLabel } from "@/lib/genogram/relations";
+import {
+  SPOUSE_NOT_ADDED_MESSAGE,
+  divorcedSpouseQuestion,
+  remarriageQuestion,
+} from "@/lib/genogram/spouse-history";
 import type {
   FamilyGraph,
   FamilyNode,
   Gender,
   RelativeRelation,
+  SpouseHistory,
   VitalStatus,
 } from "@/lib/genogram/types";
 import { validateNewPerson } from "@/lib/genogram/validate";
@@ -91,6 +96,22 @@ function personPatch(fields: FormFields, name: string) {
   };
 }
 
+const SPOUSE_NOT_ADDED = "notAdded" as const;
+
+/**
+ * A spouse added to someone already married is either an ex from before the current
+ * marriage or a remarriage after it; the counselor says which, or the addition stops.
+ */
+function askSpouseHistory(graph: FamilyGraph, anchorId: string): SpouseHistory | typeof SPOUSE_NOT_ADDED | undefined {
+  const exQuestion = divorcedSpouseQuestion(graph, anchorId);
+  if (!exQuestion) return undefined;
+  if (window.confirm(exQuestion)) return "divorcedEx";
+  const remarriage = remarriageQuestion(graph, anchorId);
+  if (remarriage && window.confirm(remarriage)) return "remarriage";
+  window.alert(SPOUSE_NOT_ADDED_MESSAGE);
+  return SPOUSE_NOT_ADDED;
+}
+
 function existingAnchorId(graph: FamilyGraph, preferredId: string): string {
   const preferredExists = graph.nodes.some((node) => node.id === preferredId);
   return preferredExists ? preferredId : (graph.nodes[0]?.id ?? "");
@@ -130,7 +151,6 @@ function PersonFormFields() {
       relation,
       anchorId,
       anchorHasParent: personHasParent(graph, anchorId),
-      anchorHasCurrentSpouse: hasCurrentSpouse(graph, anchorId),
     });
     if (error) {
       window.alert(error);
@@ -140,7 +160,10 @@ function PersonFormFields() {
       updatePerson(editingPerson.id, personPatch(fields, editingPerson.data.name));
       return;
     }
+    const spouseHistory = relation === "spouse" ? askSpouseHistory(graph, anchorId) : undefined;
+    if (spouseHistory === SPOUSE_NOT_ADDED) return;
     addPerson({
+      spouseHistory,
       ...personPatch(
         { ...fields, isIndexPerson: graph.nodes.length === 0 || fields.isIndexPerson },
         "",

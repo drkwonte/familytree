@@ -6,6 +6,7 @@ import {
   type Gender,
   type PersonData,
   type RelativeRelation,
+  type SpouseHistory,
   type VitalStatus,
 } from "./types";
 
@@ -174,7 +175,7 @@ function findCoParent(graph: FamilyGraph, personId: string): string | undefined 
       CO_PARENT_KINDS.has(item.kind) &&
       (item.source === personId || item.target === personId),
   );
-  const edge = edges.find((item) => makesCurrentSpouse(item.kind)) ?? edges[0];
+  const edge = edges.find((item) => isCurrentSpouseEdge(graph, item, personId)) ?? edges[0];
   if (!edge) return undefined;
   return edge.source === personId ? edge.target : edge.source;
 }
@@ -193,6 +194,8 @@ export function addRelative(
     isIndexPerson?: boolean;
     anchorId?: string;
     relation: RelativeRelation;
+    /** For a spouse of someone already married: whether the new person is a divorced ex or a remarriage. */
+    spouseHistory?: SpouseHistory;
   },
 ): FamilyGraph {
   const nextNode: FamilyNode = {
@@ -228,7 +231,7 @@ export function addRelative(
   }
   switch (params.relation) {
     case "spouse":
-      return addEdge(next, anchor, nextNode.id, findCoParent(graph, anchor) ? "remarriage" : "marriage");
+      return addSpouse(next, anchor, nextNode.id, params.spouseHistory);
     case "father":
     case "mother": {
       const withParent = addEdge(next, nextNode.id, anchor, "parent");
@@ -459,6 +462,42 @@ export function isCoupleKind(kind: string): boolean {
 /** Couple lines that leave a person free to marry again: an ended marriage, or a partner who never was a spouse. */
 const NOT_A_CURRENT_SPOUSE_KINDS: ReadonlySet<string> = new Set(["divorce", "affair"]);
 
+const NO_LONGER_LIVING: ReadonlySet<VitalStatus> = new Set<VitalStatus>(["deceased", "stillbirth", "miscarriage", "abortion"]);
+
 export function makesCurrentSpouse(kind: string): boolean {
   return isCoupleKind(kind) && !NOT_A_CURRENT_SPOUSE_KINDS.has(kind);
+}
+
+function isLiving(graph: FamilyGraph, personId: string): boolean {
+  const person = graph.nodes.find((node) => node.id === personId);
+  return person != null && !NO_LONGER_LIVING.has(person.data.vitalStatus);
+}
+
+/** A marriage still in force: not ended by divorce, and the partner is alive, so a widowed person is free to remarry. */
+export function isCurrentSpouseEdge(graph: FamilyGraph, edge: FamilyEdge, personId: string): boolean {
+  if (edge.category !== "structural" || !makesCurrentSpouse(edge.kind)) return false;
+  if (edge.source !== personId && edge.target !== personId) return false;
+  return isLiving(graph, edge.source === personId ? edge.target : edge.source);
+}
+
+/** Ends this person's marriages in force, as when they divorced before the marriage now being added. */
+function divorceCurrentSpouses(graph: FamilyGraph, personId: string): FamilyGraph {
+  return {
+    ...graph,
+    edges: graph.edges.map((edge) =>
+      isCurrentSpouseEdge(graph, edge, personId) ? { ...edge, kind: "divorce" } : edge,
+    ),
+  };
+}
+
+function spouseEdgeKind(graph: FamilyGraph, anchorId: string, history?: SpouseHistory): FamilyEdge["kind"] {
+  if (history === "divorcedEx") return "divorce";
+  if (history === "remarriage") return "remarriage";
+  return findCoParent(graph, anchorId) ? "remarriage" : "marriage";
+}
+
+function addSpouse(graph: FamilyGraph, anchorId: string, spouseId: string, history?: SpouseHistory): FamilyGraph {
+  const kind = spouseEdgeKind(graph, anchorId, history);
+  const prepared = history === "remarriage" ? divorceCurrentSpouses(graph, anchorId) : graph;
+  return addEdge(prepared, anchorId, spouseId, kind);
 }

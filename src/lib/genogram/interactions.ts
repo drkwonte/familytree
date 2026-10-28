@@ -1,7 +1,6 @@
 import { type InteractionAction, RELATION_KIND_LABELS, type RelationKind } from "./interaction-options";
 import { hasCurrentSpouse } from "./partners";
 import { addHousehold, createEdgeId, isCoupleKind, makesCurrentSpouse, personCode } from "./relations";
-import { SPOUSE_ALREADY_EXISTS_MESSAGE } from "./validate";
 import { EMOTIONAL_KINDS, type FamilyEdge, type FamilyGraph, type FamilyNode, type Household, type StructuralKind } from "./types";
 
 /** One counselor pick from the interaction menus: person A, person B and what to draw between them. */
@@ -9,6 +8,9 @@ export type Interaction = { firstId: string; secondId: string; action: Interacti
 
 export type InteractionResult = { ok: true; graph: FamilyGraph; message: string } | { ok: false; message: string };
 
+/** The menus only redraw a line between two people; an ended marriage is shown by picking 이혼 for it. */
+export const SPOUSE_ALREADY_EXISTS_MESSAGE =
+  "이미 배우자가 있습니다. 이전에 끝난 결혼이라면 그 두 사람 사이를 먼저 '이혼'으로 표시해 주세요.";
 const MISSING_PERSON_MESSAGE = "선택한 인물을 가계도에서 찾지 못했습니다. 인물을 다시 선택해 주세요.";
 const SAME_PERSON_MESSAGE = "서로 다른 두 인물을 선택해 주세요.";
 const PARENT_KINDS: ReadonlySet<string> = new Set<StructuralKind>(["parent", "adopted", "foster"]);

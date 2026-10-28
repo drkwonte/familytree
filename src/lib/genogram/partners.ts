@@ -1,4 +1,4 @@
-import { isCoupleKind, makesCurrentSpouse } from "./relations";
+import { isCoupleKind, isCurrentSpouseEdge } from "./relations";
 import type { FamilyEdge, FamilyGraph, FamilyNode, Gender } from "./types";
 
 const PARENT_KINDS: ReadonlySet<string> = new Set(["parent", "adopted", "foster"]);
@@ -23,15 +23,16 @@ function partnerIds(graph: FamilyGraph, personId: string): string[] {
     .map((edge) => partnerOn(edge, personId));
 }
 
+/** Partners this person is still married to or living with. */
+export function currentSpouseIds(graph: FamilyGraph, personId: string): string[] {
+  return graph.edges
+    .filter((edge) => isCurrentSpouseEdge(graph, edge, personId))
+    .map((edge) => partnerOn(edge, personId));
+}
+
 /** Whether this person is still married or living with someone, apart from `ignoredPartnerId`. */
 export function hasCurrentSpouse(graph: FamilyGraph, personId: string, ignoredPartnerId?: string): boolean {
-  return graph.edges.some(
-    (edge) =>
-      edge.category === "structural" &&
-      makesCurrentSpouse(edge.kind) &&
-      (edge.source === personId || edge.target === personId) &&
-      partnerOn(edge, personId) !== ignoredPartnerId,
-  );
+  return currentSpouseIds(graph, personId).some((partnerId) => partnerId !== ignoredPartnerId);
 }
 
 function childIdsOf(graph: FamilyGraph, parentId: string): Set<string> {

@@ -4,10 +4,6 @@ const SIBLING_RELATIONS = new Set<RelativeRelation>(["brother", "sister", "sibli
 
 export const SIBLING_NEEDS_PARENT_MESSAGE =
   "부모를 먼저 입력한 후 형제를 입력해 주세요.";
-
-/** A new spouse is a remarriage, which the genogram only draws once the earlier marriage ended in divorce. */
-export const SPOUSE_ALREADY_EXISTS_MESSAGE = "이미 배우자가 있습니다.";
-
 function isSiblingRelation(relation: RelativeRelation | ""): boolean {
   return relation !== "" && SIBLING_RELATIONS.has(relation);
 }
@@ -19,7 +15,6 @@ export function validateNewPerson(input: {
   relation: RelativeRelation | "";
   anchorId: string;
   anchorHasParent?: boolean;
-  anchorHasCurrentSpouse?: boolean;
 }): string | null {
   const trimmedAge = input.age.trim();
   if (trimmedAge) {
@@ -37,9 +32,6 @@ export function validateNewPerson(input: {
     }
     if (isSiblingRelation(input.relation) && !input.anchorHasParent) {
       return SIBLING_NEEDS_PARENT_MESSAGE;
-    }
-    if (input.relation === "spouse" && input.anchorHasCurrentSpouse) {
-      return SPOUSE_ALREADY_EXISTS_MESSAGE;
     }
   }
   return null;

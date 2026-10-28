@@ -71,6 +71,12 @@ export const RELATIVE_RELATIONS = [
 ] as const;
 export type RelativeRelation = (typeof RELATIVE_RELATIONS)[number];
 
+/**
+ * How a spouse added to an already married person fits in: an ex from a marriage that
+ * ended before the current one, or a remarriage that ends the current one in divorce.
+ */
+export type SpouseHistory = "divorcedEx" | "remarriage";
+
 export type EdgeCategory = "structural" | "emotional";
 
 export type ViewMode = "edit" | "final";
